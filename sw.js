@@ -4,7 +4,7 @@
 // API/Auth, Scryfall) are never intercepted or cached.
 // The Phase 7c fingerprint pack (~15 MB) lives in its own cache: it changes
 // at most when a new set releases, so app updates must never evict it.
-const CACHE = 'spellbinder-v14';
+const CACHE = 'spellbinder-v15';
 const PACK_CACHE = 'spellbinder-fingerprint-v1';
 const PACK_FILES = ['fingerprint-pack.bin', 'fingerprint-meta.json'];
 const SHELL = [

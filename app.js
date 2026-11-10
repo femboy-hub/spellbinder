@@ -914,9 +914,11 @@ async function showLookupPanel(card) {
   const prices = card.prices || {};
   const img = scryImage(card);
   const { data: binders } = await sb.from('binders')
-    .select('id, name').eq('owner_id', state.user.id).order('created_at');
+    .select('id, name, is_main').eq('owner_id', state.user.id).order('created_at');
   const binderList = binders || [];
-  const mainId = (binderList.find(b => (b.name || '').trim().toLowerCase() === 'main collection') || binderList[0] || {}).id;
+  // A-15 (v15): the default filing binder is the is_main FLAG, never a
+  // name match — renaming Main Collection must not redirect filings.
+  const mainId = (binderList.find(b => b.is_main) || binderList[0] || {}).id;
   const binderOptions = binderList.map(b =>
     '<option value="' + esc(b.id) + '"' + (b.id === mainId ? ' selected' : '') + '>' + esc(b.name) + '</option>').join('');
   panel.innerHTML =
@@ -933,6 +935,7 @@ async function showLookupPanel(card) {
         '</select></label>' +
       '<label>Add to ' +
         '<select id="lookup-binder">' + binderOptions + '</select></label>' +
+      '<span class="muted" data-lookup-hint></span>' +
       '<button type="button" class="btn btn-accent" id="lookup-add">Add</button>' +
       '<button type="button" class="btn btn-ghost" id="lookup-cancel">Close</button>' +
     '</div>';
@@ -940,6 +943,16 @@ async function showLookupPanel(card) {
   panel.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   const ownedEl = panel.querySelector('[data-lookup-owned]');
   ownedEl.textContent = await lookupOwnedLine(card);
+  // A-21 hint (v15): signpost what the chosen binder means for Spares.
+  const lookupHintEl = panel.querySelector('[data-lookup-hint]');
+  const paintLookupHint = () => {
+    const chosen = binderList.find(x => x.id === $('#lookup-binder').value);
+    lookupHintEl.textContent = chosen && chosen.is_main
+      ? 'Filed into your Main Collection, so it counts in Spares and the set binders.'
+      : 'Only cards in your Main Collection count in Spares and the set binders.';
+  };
+  $('#lookup-binder').addEventListener('change', paintLookupHint);
+  paintLookupHint();
   $('#lookup-cancel').addEventListener('click', () => { panel.hidden = true; });
   $('#lookup-add').addEventListener('click', async () => {
     const binder = binderList.find(b => b.id === $('#lookup-binder').value);
@@ -2023,7 +2036,10 @@ async function saveDeck(ev) {
       if (error) throw error;
       if (state.currentDeck && state.currentDeck.id === state.editingDeckId) {
         Object.assign(state.currentDeck, payload);
-        paintDeckHead({});
+        // A-8 (v15): repaint from the loaded cards — painting an empty
+        // totals object here rendered "undefined cards · $NaN" until
+        // the deck was re-opened.
+        renderDeck();
       }
       showNotice('Deck updated');
     } else {
@@ -2301,12 +2317,24 @@ async function searchDeckCards(ev) {
       const row = document.createElement('div');
       row.className = 'mini-row';
       const img = scryImage(card);
+      // A-11 (v15): offer only the finishes this printing actually has,
+      // built from card.finishes like the binder panel — a foil-only
+      // printing gets foil alone (locked in), a nonfoil-only printing
+      // gets no foil option, both finishes keep the normal choice.
+      const finishes = card.finishes || ['nonfoil'];
+      const canFoil = finishes.includes('foil') || finishes.includes('etched');
+      const canNonfoil = finishes.includes('nonfoil');
+      const defaultFoil = canFoil && !canNonfoil;
       row.innerHTML =
         (img ? '<img src="' + esc(img) + '" alt="">' : '') +
         '<span class="grow"><span class="nm">' + esc(card.name) + '</span><br>' +
         '<span class="sub">' + esc(card.set_name || '') + ' · #' + esc(card.collector_number || '') + '</span></span>' +
         '<select class="deck-add-board"><option value="main">Main</option><option value="commander">Commander</option><option value="sideboard">Sideboard</option></select>' +
-        '<select class="deck-add-finish"><option value="n">Non-foil</option><option value="f">Foil</option></select>' +
+        '<select class="deck-add-finish">' +
+          (canNonfoil ? '<option value="n"' + (!defaultFoil ? ' selected' : '') + '>Non-foil</option>' : '') +
+          (canFoil ? '<option value="f"' + (defaultFoil ? ' selected' : '') + '>Foil</option>' : '') +
+        '</select>' +
+        (canFoil && canNonfoil ? '' : '<span class="sub">' + (defaultFoil ? 'Foil only' : 'Non-foil only') + '</span>') +
         '<button type="button" class="btn btn-accent">Add</button>';
       $('button', row).addEventListener('click', async () => {
         try {
@@ -2412,6 +2440,24 @@ const FP_WEAK_D = 26;
 const FP_SAMPLE_MS = 300;
 const FP_BURST = 3;          // frames averaged into one hash
 
+// Match-strength wording (v15, finalize Q3): members decide from a
+// word, not a raw Hamming distance — Strong / Close / Weak mapped
+// from the same thresholds the presentation logic already uses, with
+// the number kept alongside in small print. The tie line mirrors the
+// Muse app's honesty rule: when printings tie at the best distance,
+// say so and let the member pick — never declare a winner.
+function fpStrengthWord(d) {
+  if (d <= FP_STRONG_D) return 'Strong';
+  if (d <= FP_WEAK_D) return 'Close';
+  return 'Weak';
+}
+function fpTieLine(source, d) {
+  const n = source === 'live' ? live.tieCount : photoTieCount;
+  const td = source === 'live' ? live.tieD : photoTieD;
+  if (!n || n < 2 || td !== d) return '';
+  return n + ' printings tie at distance ' + td + ' — pick the one that matches';
+}
+
 const live = {
   pack: null, packPromise: null,      // { view, count, meta } once loaded
   stream: null, timer: null,
@@ -2422,10 +2468,12 @@ const live = {
   stableId: '', stableN: 0,           // stability streak
   suppressId: '',                     // presented printing, until it leaves the frame
   candidates: [],                     // latest top matches [{ i, d }]
+  tieCount: 0, tieD: 0,               // printings tied at the best distance (whole pack)
   torchOn: false
 };
 
 let photoCandidates = [];             // photo path's latest top matches
+let photoTieCount = 0, photoTieD = 0; // printings tied at the best distance (whole pack)
 // The one presentation on screen (from either source), or null:
 // { source: 'live' | 'photo', i, d, filed }
 let fpPresent = null;
@@ -2798,6 +2846,7 @@ function handleLiveSample(res) {
   if (!best || best.d > FP_WEAK_D) {
     live.stableId = ''; live.stableN = 0;
     live.candidates = [];
+    live.tieCount = 0; live.tieD = 0;
     paintFpCandidates('live');
     liveSetStatus('Looking… fill the frame with one card, flat and out of glare.');
     return;
@@ -2805,11 +2854,13 @@ function handleLiveSample(res) {
   if (bestId === live.suppressId) {
     live.stableId = ''; live.stableN = 0;
     live.candidates = [];
+    live.tieCount = 0; live.tieD = 0;
     paintFpCandidates('live');
     liveSetStatus('Move the card away to scan the next one.');
     return;
   }
   live.candidates = res.top.slice(0, 5);
+  live.tieCount = res.tieCount; live.tieD = best.d;
   paintFpCandidates('live');
   if (res.tieCount === 1 && consensusId === bestId) {
     if (live.stableId === bestId) live.stableN++;
@@ -2843,10 +2894,18 @@ function paintFpCandidates(source) {
       '<span><span class="hit-name">' + esc(m.name) + '</span>' +
       '<span class="hit-sub" style="display:block">' + esc(String(m.set).toUpperCase()) + ' · #' + esc(m.cn) +
       (m.lang && m.lang !== 'en' ? ' · ' + esc(String(m.lang).toUpperCase()) : '') +
-      ' · distance ' + entry.d + '</span></span>';
+      ' · ' + fpStrengthWord(entry.d) + ' match · distance ' + entry.d + '</span></span>';
     b.addEventListener('click', () => presentFpMatch(entry, source));
     wrap.appendChild(b);
   });
+  const bestEntry = list[0];
+  const tie = bestEntry ? fpTieLine(source, bestEntry.d) : '';
+  if (tie) {
+    const note = document.createElement('div');
+    note.className = 'muted small';
+    note.textContent = tie;
+    wrap.appendChild(note);
+  }
 }
 
 async function presentFpMatch(entry, source) {
@@ -2870,7 +2929,7 @@ function renderFpPresent() {
   const m = live.pack.meta[fpPresent.i];
   wrap.hidden = false;
   const binderOpts = state.binders.map((b) =>
-    '<option value="' + esc(b.id) + '"' + (b.name === 'Main Collection' ? ' selected' : '') + '>' + esc(b.name) + '</option>').join('');
+    '<option value="' + esc(b.id) + '"' + (b.is_main ? ' selected' : '') + '>' + esc(b.name) + '</option>').join('');
   wrap.innerHTML =
     '<div class="pick-panel">' +
       '<div class="pick-row">' +
@@ -2879,8 +2938,10 @@ function renderFpPresent() {
           '<div class="hit-name">' + esc(m.name) + '</div>' +
           '<div class="muted small">' + esc(String(m.set).toUpperCase()) + ' · #' + esc(m.cn) +
             (m.lang && m.lang !== 'en' ? ' · ' + esc(String(m.lang).toUpperCase()) : '') +
-            ' · distance ' + fpPresent.d + '</div>' +
+            ' · ' + fpStrengthWord(fpPresent.d) + ' match · distance ' + fpPresent.d + '</div>' +
           '<div class="muted small">On-device match — no internet used</div>' +
+          (fpTieLine(fpPresent.source, fpPresent.d)
+            ? '<div class="muted small">' + esc(fpTieLine(fpPresent.source, fpPresent.d)) + '</div>' : '') +
         '</div>' +
       '</div>' +
       '<div class="row wrap gap" style="margin-top:.6rem">' +
@@ -2890,6 +2951,7 @@ function renderFpPresent() {
         '<label class="field inline"><span>Qty</span><input type="number" min="1" max="99" value="1" data-fp-qty style="width:70px"></label>' +
         '<label class="field inline"><span>Binder</span><select data-fp-binder>' + binderOpts + '</select></label>' +
       '</div>' +
+      '<p class="muted small" data-fp-hint style="margin:.45rem 0 0"></p>' +
       '<div class="row wrap gap" style="margin-top:.6rem">' +
         (fpPresent.filed
           ? '<span class="saved-note">Filed ✓</span>'
@@ -2902,6 +2964,18 @@ function renderFpPresent() {
   const fileBtn = wrap.querySelector('[data-fp-file]');
   if (fileBtn) fileBtn.addEventListener('click', fileFpMatch);
   wrap.querySelector('[data-fp-dismiss]').addEventListener('click', () => dismissFpPresent(fpPresent.source));
+  // A-21 hint (v15): signpost what the chosen binder means for Spares.
+  const fpBinderSel = wrap.querySelector('[data-fp-binder]');
+  const fpHintEl = wrap.querySelector('[data-fp-hint]');
+  const paintFpHint = () => {
+    if (!fpBinderSel || !fpHintEl) return;
+    const chosen = state.binders.find((b) => b.id === fpBinderSel.value);
+    fpHintEl.textContent = chosen && chosen.is_main
+      ? 'Filed into your Main Collection, so it counts in Spares and the set binders.'
+      : 'Only cards in your Main Collection count in Spares and the set binders.';
+  };
+  if (fpBinderSel) fpBinderSel.addEventListener('change', paintFpHint);
+  paintFpHint();
 }
 
 function dismissFpPresent(source) {
@@ -2923,7 +2997,7 @@ async function fileFpMatch() {
   const showErr = (msg) => { if (errEl) { errEl.hidden = !msg; errEl.textContent = msg || ''; } };
   const binderSel = wrap.querySelector('[data-fp-binder]');
   const binder = state.binders.find((b) => b.id === (binderSel && binderSel.value)) ||
-    state.binders.find((b) => b.name === 'Main Collection') || state.binders[0];
+    state.binders.find((b) => b.is_main) || state.binders[0];
   if (!binder) { showErr('You have no binder yet — create one on the home page first.'); return; }
   const finishSel = wrap.querySelector('[data-fp-finish]');
   const qtyEl = wrap.querySelector('[data-fp-qty]');
@@ -3019,11 +3093,13 @@ async function onPhotoFile(file) {
     const best = res.top[0];
     if (!best || best.d > FP_WEAK_D) {
       photoCandidates = [];
+      photoTieCount = 0; photoTieD = 0;
       paintFpCandidates('photo');
       photoSetStatus('No match — one card, closer and flatter, less glare.');
       return;
     }
     photoCandidates = res.top.slice(0, 5);
+    photoTieCount = res.tieCount; photoTieD = best.d;
     paintFpCandidates('photo');
     photoSetStatus('On-device match — no internet used. Tap your printing.');
   } catch (e) {

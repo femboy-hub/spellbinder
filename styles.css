@@ -20,6 +20,10 @@
   --gold: #f5c542;
   --radius: 14px;
   --shadow: 0 6px 24px rgba(0, 0, 0, .35);
+  /* Single source for the sticky tab bar's offset (A-10): the tab
+     bar sits exactly under the header; if the header height ever
+     changes, change it here only. */
+  --header-h: 52px;
   color-scheme: dark;
 }
 
@@ -123,7 +127,7 @@ img { max-width: 100%; }
 .header-name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 38vw; }
 
 .tabbar {
-  position: sticky; top: 52px; left: 0; right: 0; width: 100%; z-index: 39;
+  position: sticky; top: var(--header-h); left: 0; right: 0; width: 100%; z-index: 39;
   display: flex; flex-wrap: wrap; gap: .3rem;
   padding: .45rem max(.7rem, env(safe-area-inset-right)) .45rem max(.7rem, env(safe-area-inset-left));
   background: var(--bg); border-bottom: 1px solid var(--border);
@@ -146,12 +150,32 @@ img { max-width: 100%; }
 
 /* Narrow phones: the header gives its room to the buttons, not the name. */
 @media (max-width: 620px) {
+  :root { --header-h: 50px; }
   .header-name { display: none; }
   .app-header { padding-top: .5rem; padding-bottom: .5rem; }
-  .tabbar { top: 50px; }
   .header-user { gap: .35rem; }
   .header-user .btn { padding: .32rem .5rem; font-size: .85rem; }
   .brand { font-size: .98rem; }
+}
+
+/* Very narrow phones, 320–360 px (A-10): brand + avatar + Share +
+   Sign out (+ Install when offered) must stay reachable in the one
+   header row — the body's overflow-x: clip would otherwise make an
+   overflowing button unreachable instead of scrollable. The brand
+   goes icon-only and the row's gaps/padding shrink so everything
+   fits without wrapping or sideways overflow. */
+@media (max-width: 380px) {
+  .app-header {
+    gap: .35rem;
+    padding-left: max(.55rem, env(safe-area-inset-left));
+    padding-right: max(.55rem, env(safe-area-inset-right));
+  }
+  .brand { gap: .3rem; flex: none; }
+  .brand span { display: none; }
+  .brand svg { width: 26px; height: 26px; }
+  .header-user { gap: .25rem; flex: none; }
+  .header-user .btn { padding: .3rem .42rem; font-size: .82rem; white-space: nowrap; }
+  .header-user .avatar { width: 28px; height: 28px; }
 }
 
 .content { max-width: 1060px; margin: 0 auto; padding: 1rem .9rem 4rem; }
