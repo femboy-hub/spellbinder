@@ -586,11 +586,23 @@ async function changeQuantity(card, delta) {
       const { error } = await sb.from('binder_cards').update({ quantity: next }).eq('id', card.id);
       if (error) throw error;
     }
+    lookupOwnedCache = undefined; // v16: a quantity change alters the owned lines
     await loadBinderCards();
     loadMyBinders(); // keep home stats fresh (fire and forget)
   } catch (err) {
     showNotice('Could not update quantity: ' + friendlyError(err), 6000);
   }
+}
+
+/* Truncation honesty (v16): when a search or list was cut to its cap,
+   say so under the results instead of letting the cap look like the
+   total. No-op when nothing was cut. */
+function appendTruncationNote(box, total, cap) {
+  if (!box || total <= cap) return;
+  const note = document.createElement('p');
+  note.className = 'muted small';
+  note.textContent = 'Showing the first ' + cap + ' — try a more specific name to see the rest.';
+  box.appendChild(note);
 }
 
 /* ---------------- add card via Scryfall ---------------- */
@@ -613,11 +625,13 @@ async function searchScryfall(ev) {
     }
     if (!res.ok) throw new Error('Scryfall returned ' + res.status);
     const json = await res.json();
-    const results = (json.data || []).slice(0, 30);
+    const all = json.data || [];
+    const results = all.slice(0, 30);
     status.textContent = results.length
       ? 'Tap a printing to add it (' + results.length + ' shown).'
       : 'No cards matched that search.';
     results.forEach(card => box.appendChild(searchHit(card)));
+    appendTruncationNote(box, all.length, 30);
   } catch (err) {
     status.textContent = 'Search failed: ' + friendlyError(err);
   }
@@ -759,6 +773,7 @@ async function fileCardIntoBinder(card, binder, isFoil) {
     });
     if (error) throw error;
   }
+  lookupOwnedCache = undefined; // v16: a filing changes the Look up owned lines
 }
 
 async function addScryfallCard(card) {
@@ -821,6 +836,8 @@ async function onLookupType() {
       return { name };
     }));
     if (my !== lookupTypeSeq) return;
+    await ensureLookupOwned();
+    if (my !== lookupTypeSeq) return;
     box.innerHTML = '';
     cards.forEach(card => box.appendChild(suggestHit(card)));
     box.hidden = false;
@@ -834,16 +851,78 @@ function suggestHit(card) {
   btn.type = 'button';
   btn.className = 'search-hit';
   const img = scryImage(card);
+  const owned = lookupOwnedText(card);
   btn.innerHTML =
     (img ? '<img src="' + esc(img) + '" alt="">' : '') +
     '<span><span class="hit-name">' + esc(card.name) + '</span><br>' +
-    '<span class="hit-sub">' + esc(card.set_name || '') + ' · ' + esc(card.type_line || '') + '</span></span>';
+    '<span class="hit-sub">' + esc(card.set_name || '') + ' · ' + esc(card.type_line || '') + '</span>' +
+    (owned ? '<br><span class="hit-owned">' + esc(owned) + '</span>' : '') + '</span>';
   btn.addEventListener('click', () => {
     $('#lookup-input').value = card.name;
     $('#lookup-suggest').hidden = true;
     runLookupQuery('!"' + card.name.replace(/"/g, '') + '"');
   });
   return btn;
+}
+
+/* Owned lines on Look up rows (v16): one cached fetch of the member's
+   own binder_cards, grouped by printing with per-binder counts, so a
+   search hit can say where the member's copies live — the same honesty
+   the Muse app's search shows. The cache is dropped whenever a filing
+   or quantity change lands (fileCardIntoBinder, fileFpMatch,
+   changeCardQty), so the next search re-reads. Any failure — signed
+   out, binders not loaded, query error — leaves the cache null and the
+   rows render exactly as they did before v16. */
+let lookupOwnedCache; // undefined = not loaded yet, null = unavailable
+async function ensureLookupOwned() {
+  if (lookupOwnedCache !== undefined) return lookupOwnedCache;
+  lookupOwnedCache = null;
+  try {
+    if (!state.user) return null;
+    if (!(state.binders || []).length) {
+      try { await loadMyBinders(); } catch (e) { /* rows just render without the line */ }
+    }
+    const { data, error } = await sb.from('binder_cards')
+      .select('binder_id, scryfall_id, quantity').eq('owner_id', state.user.id);
+    if (error) throw error;
+    const byPrinting = new Map();
+    (data || []).forEach(c => {
+      if (!c.scryfall_id) return;
+      let e = byPrinting.get(c.scryfall_id);
+      if (!e) { e = { total: 0, byBinder: new Map() }; byPrinting.set(c.scryfall_id, e); }
+      const qty = c.quantity || 1;
+      e.total += qty;
+      e.byBinder.set(c.binder_id, (e.byBinder.get(c.binder_id) || 0) + qty);
+    });
+    lookupOwnedCache = byPrinting;
+  } catch (e) {
+    lookupOwnedCache = null;
+  }
+  return lookupOwnedCache;
+}
+
+function lookupOwnedText(card) {
+  if (!card || !card.id || !lookupOwnedCache) return '';
+  const e = lookupOwnedCache.get(card.id);
+  if (!e || !e.total) return '';
+  const nameOf = (id) => ((state.binders || []).find(b => b.id === id) || {}).name || '';
+  if (e.byBinder.size === 1) {
+    const only = nameOf(e.byBinder.keys().next().value);
+    return 'Owned — ×' + e.total + (only ? ' in ' + only : '');
+  }
+  // Copies in several binders: name the main one that holds copies
+  // (else the binder holding the most) and give the total count.
+  let primaryId = null;
+  const main = (state.binders || []).find(b => b.is_main);
+  if (main && e.byBinder.has(main.id)) primaryId = main.id;
+  if (!primaryId) {
+    let best = -1;
+    e.byBinder.forEach((qty, id) => { if (qty > best) { best = qty; primaryId = id; } });
+  }
+  const primary = nameOf(primaryId);
+  const others = e.byBinder.size - 1;
+  return 'Owned — ×' + e.total + (primary ? ' in ' + primary : '') +
+    ' + ' + others + ' other binder' + (others === 1 ? '' : 's');
 }
 
 async function runLookupQuery(q) {
@@ -863,11 +942,14 @@ async function runLookupQuery(q) {
     }
     if (!res.ok) throw new Error('Scryfall returned ' + res.status);
     const json = await res.json();
-    const results = (json.data || []).slice(0, 60);
+    await ensureLookupOwned();
+    const all = json.data || [];
+    const results = all.slice(0, 60);
     status.textContent = results.length
       ? results.length + ' printings — tap the one you have.'
       : 'No cards matched that search.';
     results.forEach(card => box.appendChild(lookupHit(card)));
+    appendTruncationNote(box, all.length, 60);
   } catch (err) {
     status.textContent = 'Search failed: ' + friendlyError(err);
   }
@@ -878,11 +960,13 @@ function lookupHit(card) {
   btn.type = 'button';
   btn.className = 'search-hit';
   const img = scryImage(card);
+  const owned = lookupOwnedText(card);
   btn.innerHTML =
     (img ? '<img src="' + esc(img) + '" alt="">' : '') +
     '<span><span class="hit-name">' + esc(card.printed_name && card.lang !== 'en' ? card.printed_name : card.name) + '</span><br>' +
     '<span class="hit-sub">' + esc(card.set_name || '') + ' · #' + esc(card.collector_number || '') +
-    ' · ' + esc(card.rarity || '') + (card.lang && card.lang !== 'en' ? ' · ' + esc(card.lang.toUpperCase()) : '') + '</span></span>';
+    ' · ' + esc(card.rarity || '') + (card.lang && card.lang !== 'en' ? ' · ' + esc(card.lang.toUpperCase()) : '') + '</span>' +
+    (owned ? '<br><span class="hit-owned">' + esc(owned) + '</span>' : '') + '</span>';
   btn.addEventListener('click', () => showLookupPanel(card));
   return btn;
 }
@@ -1930,7 +2014,8 @@ async function searchWants(ev) {
     if (res.status === 404) { status.textContent = 'No cards matched that search.'; return; }
     if (!res.ok) throw new Error('Scryfall returned ' + res.status);
     const json = await res.json();
-    const results = (json.data || []).slice(0, 20);
+    const all = json.data || [];
+    const results = all.slice(0, 20);
     status.textContent = results.length ? 'Tap ＋ Want to add a printing to your list.' : 'No cards matched that search.';
     results.forEach(card => {
       const row = document.createElement('div');
@@ -1961,6 +2046,7 @@ async function searchWants(ev) {
       });
       box.appendChild(row);
     });
+    appendTruncationNote(box, all.length, 20);
   } catch (err) {
     status.textContent = 'Search failed: ' + friendlyError(err);
   }
@@ -2311,7 +2397,8 @@ async function searchDeckCards(ev) {
     if (res.status === 404) { status.textContent = 'No cards matched that search.'; return; }
     if (!res.ok) throw new Error('Scryfall returned ' + res.status);
     const json = await res.json();
-    const results = (json.data || []).slice(0, 20);
+    const all = json.data || [];
+    const results = all.slice(0, 20);
     status.textContent = results.length ? 'Pick a board and finish, then Add.' : 'No cards matched that search.';
     results.forEach(card => {
       const row = document.createElement('div');
@@ -2349,6 +2436,7 @@ async function searchDeckCards(ev) {
       });
       box.appendChild(row);
     });
+    appendTruncationNote(box, all.length, 20);
   } catch (err) {
     status.textContent = 'Search failed: ' + friendlyError(err);
   }
@@ -3037,6 +3125,7 @@ async function fileFpMatch() {
       if (error) throw error;
     }
     fpPresent.filed = true;
+    lookupOwnedCache = undefined; // v16: a filing changes the Look up owned lines
     renderFpPresent();
     if (fpPresent.source === 'live') liveSetStatus('Filed ✓ — move the card away to scan the next one.');
     else photoSetStatus('Filed ✓');

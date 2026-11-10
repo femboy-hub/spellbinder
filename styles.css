@@ -229,6 +229,7 @@ img { max-width: 100%; }
 .search-hit img { width: 42px; height: 58px; object-fit: cover; border-radius: 5px; background: var(--surface-2); }
 .search-hit .hit-name { font-weight: 600; }
 .search-hit .hit-sub { color: var(--muted); font-size: .83rem; }
+.search-hit .hit-owned { color: var(--accent); font-size: .83rem; font-weight: 600; }
 .pick-panel { margin-top: .8rem; background: var(--surface); border: 1px solid var(--accent); border-radius: 10px; padding: .8rem; }
 .pick-panel .pick-row { display: flex; gap: .8rem; align-items: center; flex-wrap: wrap; }
 
