@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="96" fill="#14141c"/>
+  <g fill="none" stroke="#8b7cf6" stroke-width="26" stroke-linecap="round">
+    <!-- open book / binder pages -->
+    <path d="M256 120 C 210 88, 150 78, 96 92 L 96 392 C 150 378, 210 388, 256 420" fill="#1f1f2b"/>
+    <path d="M256 120 C 302 88, 362 78, 416 92 L 416 392 C 362 378, 302 388, 256 420" fill="#1f1f2b"/>
+    <path d="M256 120 L 256 420"/>
+  </g>
+  <!-- spark -->
+  <path d="M256 176 l14 40 40 14 -40 14 -14 40 -14 -40 -40 -14 40 -14 z" fill="#f5c542"/>
+</svg>

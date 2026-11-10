@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Spellbinder — your Magic collection</title>
+<meta name="description" content="Spellbinder: keep your Magic: The Gathering collection in binders, show off your showcase, and browse other members' public binders.">
+<meta name="theme-color" content="#14141c">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/svg+xml" href="icon.svg">
+<!-- iOS home-screen app behaviour -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Spellbinder">
+<link rel="apple-touch-icon" href="icon.svg">
+<link rel="stylesheet" href="styles.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="config.js"></script>
+</head>
+<body>
+
+<!-- Global notice / toast area -->
+<div id="notice" class="notice" hidden></div>
+
+<!-- ============ Signed-out screen ============ -->
+<main id="view-auth" class="auth-wrap" hidden>
+  <div class="auth-card">
+    <div class="logo" aria-hidden="true">
+      <svg viewBox="0 0 512 512" width="72" height="72"><rect width="512" height="512" rx="96" fill="#1f1f2b"/><g fill="none" stroke="#8b7cf6" stroke-width="26" stroke-linecap="round"><path d="M256 120 C 210 88, 150 78, 96 92 L 96 392 C 150 378, 210 388, 256 420" fill="#262638"/><path d="M256 120 C 302 88, 362 78, 416 92 L 416 392 C 362 378, 302 388, 256 420" fill="#262638"/><path d="M256 120 L 256 420"/></g><path d="M256 176 l14 40 40 14 -40 14 -14 40 -14 -40 -40 -14 40 -14 z" fill="#f5c542"/></svg>
+    </div>
+    <h1>Spellbinder</h1>
+    <p class="tagline">Your Magic collection, in binders — and a showcase for the cards you're proud of.</p>
+    <button id="btn-google" class="btn btn-google" type="button">
+      <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true"><path fill="#FFC107" d="M43.6 20.1H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 8 3l5.7-5.7C34.3 6.1 29.3 4 24 4 13 4 4 13 4 24s9 20 20 20 20-9 20-20c0-1.3-.1-2.6-.4-3.9z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.8 1.2 8 3l5.7-5.7C34.3 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-8l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.1H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C36.9 39.2 44 34 44 24c0-1.3-.1-2.6-.4-3.9z"/></svg>
+      Sign in with Google
+    </button>
+    <p class="auth-note">Anyone can join. Your collection is private unless you choose to make a binder public.</p>
+    <button id="btn-install-auth" class="btn btn-ghost install-btn" type="button" hidden>📲 Install the app</button>
+    <button id="btn-share-auth" class="btn btn-ghost share-btn" type="button">🔗 Share Spellbinder</button>
+    <p id="auth-error" class="error" hidden></p>
+  </div>
+</main>
+
+<!-- ============ Signed-in app shell ============ -->
+<div id="view-app" hidden>
+  <header class="app-header">
+    <button class="brand" id="brand-home" type="button" aria-label="Spellbinder home">
+      <svg viewBox="0 0 512 512" width="30" height="30" aria-hidden="true"><rect width="512" height="512" rx="96" fill="#1f1f2b"/><g fill="none" stroke="#8b7cf6" stroke-width="30" stroke-linecap="round"><path d="M256 120 C 210 88, 150 78, 96 92 L 96 392 C 150 378, 210 388, 256 420"/><path d="M256 120 C 302 88, 362 78, 416 92 L 416 392 C 362 378, 302 388, 256 420"/><path d="M256 120 L 256 420"/></g><path d="M256 176 l14 40 40 14 -40 14 -14 40 -14 -40 -40 -14 40 -14 z" fill="#f5c542"/></svg>
+      <span>Spellbinder</span>
+    </button>
+    <div class="header-user">
+      <span id="header-avatar" class="avatar" aria-hidden="true"></span>
+      <span id="header-name" class="header-name"></span>
+      <button id="btn-install-header" class="btn btn-ghost install-btn" type="button" hidden>📲 Install</button>
+      <button id="btn-share-header" class="btn btn-ghost share-btn" type="button">🔗 Share</button>
+      <button id="btn-signout" class="btn btn-ghost" type="button">Sign out</button>
+    </div>
+  </header>
+
+  <nav class="tabbar" aria-label="Main">
+    <button type="button" data-nav="home" class="tab active">Binders</button>
+    <button type="button" data-nav="lookup" class="tab">Look up</button>
+    <button type="button" data-nav="trades" class="tab">Trades</button>
+    <button type="button" data-nav="decks" class="tab">Decks</button>
+    <span class="tab-menu-wrap">
+      <button type="button" class="tab" id="tab-more" aria-haspopup="true">⋯ More</button>
+      <span class="tab-menu" id="tab-menu" hidden>
+        <button type="button" data-nav="spares" class="tab tab-menu-item">Spares &amp; wants</button>
+        <button type="button" data-nav="members" class="tab tab-menu-item">Members</button>
+        <button type="button" data-nav="profile" class="tab tab-menu-item">Profile</button>
+      </span>
+    </span>
+  </nav>
+
+  <main class="content">
+    <!-- Home: my binders -->
+    <section id="page-home" class="page">
+      <div class="page-head">
+        <h2>My binders</h2>
+        <button id="btn-new-binder" class="btn btn-accent" type="button">+ New binder</button>
+      </div>
+      <div id="import-note"></div>
+      <div id="binder-list" class="binder-list"></div>
+      <p id="home-empty" class="empty" hidden>No binders yet. Create your first one.</p>
+      <p id="home-loading" class="muted">Loading your binders…</p>
+      <p id="home-error" class="error" hidden></p>
+
+      <div id="set-area" hidden>
+        <div class="page-head"><h2>Sets by release</h2></div>
+        <p class="muted">Auto-created from your Main Collection — these binders fill themselves as you add cards. Open one to browse; edits happen in Main Collection.</p>
+        <div id="set-sections"></div>
+      </div>
+    </section>
+
+    <!-- Binder detail -->
+    <section id="page-binder" class="page" hidden>
+      <button class="btn btn-ghost back-btn" id="binder-back" type="button">← Back</button>
+      <div class="page-head binder-head">
+        <div>
+          <h2 id="binder-title"></h2>
+          <p id="binder-meta" class="muted"></p>
+        </div>
+        <div id="binder-owner-actions" class="row-gap">
+          <button id="btn-edit-binder" class="btn" type="button">Edit binder</button>
+          <button id="btn-delete-binder" class="btn btn-danger" type="button">Delete</button>
+        </div>
+      </div>
+
+      <div id="binder-controls" class="controls">
+        <label class="control">
+          <span>Sort</span>
+          <select id="sort-select">
+            <option value="added">Recently added</option>
+            <option value="name">Name</option>
+            <option value="price">Price (high first)</option>
+          </select>
+        </label>
+        <label class="control check">
+          <input type="checkbox" id="group-set-toggle">
+          <span>Group by set</span>
+        </label>
+      </div>
+
+      <div id="add-card-box" class="add-card-box">
+        <h3>Add a card</h3>
+        <form id="search-form" class="search-row">
+          <input id="search-input" type="search" placeholder="Search Scryfall — e.g. Smaug" autocomplete="off">
+          <button class="btn btn-accent" type="submit">Search</button>
+        </form>
+        <p id="search-status" class="muted"></p>
+        <div id="search-results" class="search-results"></div>
+        <div id="pick-panel" class="pick-panel" hidden></div>
+      </div>
+
+      <div id="card-area"></div>
+      <p id="binder-loading" class="muted">Loading cards…</p>
+      <p id="binder-error" class="error" hidden></p>
+    </section>
+
+    <!-- Members -->
+    <section id="page-members" class="page" hidden>
+      <div class="page-head"><h2>Members</h2></div>
+      <input id="member-search" class="search-input" type="search" placeholder="Search members by name…" autocomplete="off">
+      <div id="member-list" class="member-list"></div>
+      <p id="members-loading" class="muted">Loading members…</p>
+      <p id="members-error" class="error" hidden></p>
+    </section>
+
+    <!-- One member's public page -->
+    <section id="page-member" class="page" hidden>
+      <button class="btn btn-ghost back-btn" id="member-back" type="button">← All members</button>
+      <div class="member-hero">
+        <span id="member-avatar" class="avatar avatar-lg"></span>
+        <h2 id="member-name"></h2>
+      </div>
+      <div class="row-gap member-actions">
+        <button id="btn-propose-trade" class="btn btn-accent" type="button">Propose a trade</button>
+      </div>
+      <div id="member-binders" class="binder-list"></div>
+      <p id="member-empty" class="empty" hidden>This member hasn't made anything public yet.</p>
+
+      <div id="member-decks-block" hidden>
+        <h3 class="family-title">Their public decks</h3>
+        <div id="member-decks" class="binder-list"></div>
+      </div>
+
+      <div id="member-spares-block" hidden>
+        <h3 class="family-title">Their spares</h3>
+        <p class="muted small">Duplicate copies from their Main Collection. ★ = on your want list.</p>
+        <div id="member-spares" class="mini-list"></div>
+      </div>
+
+      <div id="member-wants-block" hidden>
+        <h3 class="family-title">Their want list</h3>
+        <div id="member-wants" class="mini-list"></div>
+      </div>
+      <p id="member-loading" class="muted">Loading…</p>
+    </section>
+
+    <!-- Trades -->
+    <section id="page-trades" class="page" hidden>
+      <div class="page-head"><h2>Trades</h2></div>
+      <p class="muted">Start a trade from a member's page. When a trade is accepted, the cards move between your Main Collections automatically.</p>
+      <h3 class="family-title">Open trades</h3>
+      <div id="open-trades"></div>
+      <p id="trades-empty" class="empty" hidden>No open trades right now.</p>
+      <h3 class="family-title">Trade history</h3>
+      <input id="trade-log-search" class="search-input" type="search" placeholder="Search history by member name…" autocomplete="off">
+      <div id="trade-log"></div>
+      <p id="trades-loading" class="muted">Loading trades…</p>
+      <p id="trades-error" class="error" hidden></p>
+    </section>
+
+    <!-- Trade composer -->
+    <section id="page-compose" class="page" hidden>
+      <button class="btn btn-ghost back-btn" id="compose-back" type="button">← Back</button>
+      <div class="page-head"><h2 id="compose-title">Propose a trade</h2></div>
+      <p id="compose-balance" class="compose-balance muted"></p>
+      <div class="compose-grid">
+        <div>
+          <h3 class="family-title">You give</h3>
+          <input id="compose-give-search" class="search-input" type="search" placeholder="Filter your cards…" autocomplete="off">
+          <div id="compose-give" class="pick-list"></div>
+        </div>
+        <div>
+          <h3 class="family-title">You get</h3>
+          <input id="compose-get-search" class="search-input" type="search" placeholder="Filter their cards…" autocomplete="off">
+          <div id="compose-get" class="pick-list"></div>
+        </div>
+      </div>
+      <label class="field">
+        <span>Note (optional)</span>
+        <input id="compose-note" type="text" maxlength="200" placeholder="Anything to say about this trade?">
+      </label>
+      <div class="row-gap">
+        <button id="compose-send" class="btn btn-accent" type="button">Send proposal</button>
+        <span id="compose-status" class="muted"></span>
+      </div>
+    </section>
+
+    <!-- Decks -->
+    <section id="page-decks" class="page" hidden>
+      <div class="page-head">
+        <h2>My decks</h2>
+        <button id="btn-new-deck" class="btn btn-accent" type="button">+ New deck</button>
+      </div>
+      <div id="deck-list" class="binder-list"></div>
+      <p id="decks-empty" class="empty" hidden>No decks yet. Create your first one.</p>
+      <p id="decks-loading" class="muted">Loading decks…</p>
+      <p id="decks-error" class="error" hidden></p>
+    </section>
+
+    <!-- Deck detail -->
+    <section id="page-deck" class="page" hidden>
+      <button class="btn btn-ghost back-btn" id="deck-back" type="button">← Back</button>
+      <div class="page-head binder-head">
+        <div>
+          <h2 id="deck-title"></h2>
+          <p id="deck-meta" class="muted"></p>
+          <p id="deck-notes" class="muted"></p>
+        </div>
+        <div id="deck-owner-actions" class="row-gap">
+          <button id="btn-edit-deck" class="btn" type="button">Edit deck</button>
+          <button id="btn-import-deck" class="btn" type="button">Import list</button>
+          <button id="btn-delete-deck" class="btn btn-danger" type="button">Delete</button>
+        </div>
+      </div>
+
+      <div id="deck-add-box" class="add-card-box">
+        <h3>Add a card</h3>
+        <form id="deck-search-form" class="search-row">
+          <input id="deck-search-input" type="search" placeholder="Search Scryfall — e.g. Smaug" autocomplete="off">
+          <button class="btn btn-accent" type="submit">Search</button>
+        </form>
+        <p id="deck-search-status" class="muted"></p>
+        <div id="deck-search-results" class="search-results"></div>
+      </div>
+
+      <div id="deck-boards"></div>
+      <p id="deck-loading" class="muted">Loading deck…</p>
+      <p id="deck-error" class="error" hidden></p>
+    </section>
+
+    <!-- Look up a card by name (all printings, pick finish, add to a binder)
+         + Scan (Phase 3) — merged into one tab at Jakson's request -->
+    <section id="page-lookup" class="page" hidden>
+      <div class="page-head"><h2>Look up a card</h2></div>
+      <p class="muted small">Type a card's name and you'll see every printing and art of it. Tap the one you
+        have, pick foil or non-foil, and add it straight into one of your binders.</p>
+      <form id="lookup-form" class="search-row">
+        <input id="lookup-input" type="search" placeholder="Card name — e.g. Smaug the Magnificent" autocomplete="off">
+        <button class="btn btn-accent" type="submit">Search</button>
+      </form>
+      <p id="lookup-status" class="muted"></p>
+      <div id="lookup-suggest" class="search-results" hidden></div>
+      <div id="lookup-panel" class="pick-panel" hidden></div>
+      <div id="lookup-results" class="search-results"></div>
+
+      <div class="page-head" style="margin-top:28px;"><h2>Scan cards</h2></div>
+
+      <!-- Live scanner: on-device fingerprint matching, single card,
+           nothing uploaded, no website consulted. -->
+      <div class="live-box">
+        <div class="row wrap gap">
+          <button type="button" class="btn btn-accent" id="live-toggle">📹 Live scan</button>
+          <span class="muted small">One card in the frame. On-device match — no internet used.</span>
+        </div>
+        <div id="live-panel" hidden>
+          <p id="live-status" class="muted small"></p>
+          <div id="live-stage" class="live-stage" hidden>
+            <video id="live-video" playsinline muted></video>
+            <div id="live-guide" class="live-guide"></div>
+          </div>
+          <div class="row wrap gap" style="margin-top:8px;">
+            <button type="button" class="btn btn-ghost" id="live-torch" hidden>🔦 Light</button>
+            <button type="button" class="btn btn-ghost" id="live-stop" hidden>Stop camera</button>
+          </div>
+          <div id="live-candidates" class="search-results"></div>
+          <div id="live-present" hidden></div>
+        </div>
+      </div>
+
+      <!-- Photo: one card per photo, matched on-device from the same
+           pack. Picking another photo is the retake. -->
+      <div class="live-box">
+        <div class="row wrap gap">
+          <span class="muted small"><strong>Photo</strong> — one card per photo. On-device match — no internet used.</span>
+        </div>
+        <div class="row wrap gap" style="margin-top:8px;">
+          <label class="btn btn-accent" for="photo-file-cam">📷 Take a photo</label>
+          <input type="file" id="photo-file-cam" accept="image/*" capture="environment" hidden>
+          <label class="btn btn-accent" for="photo-file-pick">🖼️ Add from files</label>
+          <input type="file" id="photo-file-pick" accept="image/*" hidden>
+        </div>
+        <p id="photo-status" class="muted small" hidden></p>
+        <img id="photo-preview" alt="" hidden style="display:block;max-width:260px;max-height:40vh;width:auto;object-fit:contain;border-radius:12px;margin:10px 0;">
+        <div id="photo-candidates" class="search-results"></div>
+        <div id="photo-present" hidden></div>
+      </div>
+    </section>
+
+    <!-- Spares & wants -->
+    <section id="page-spares" class="page" hidden>
+      <div class="page-head"><h2>Spares &amp; wants</h2></div>
+      <h3 class="family-title">My spares</h3>
+      <p class="muted small">Extra copies from your Main Collection — the cards you have more than one of.</p>
+      <label class="field">
+        <span>Aim at a member — their wants get flagged ★ and sorted first</span>
+        <select id="spares-aim"><option value="">— Nobody —</option></select>
+      </label>
+      <div id="my-spares" class="mini-list"></div>
+      <p id="spares-empty" class="empty" hidden>No spares yet — spares are the extra copies of cards you own more than one of.</p>
+
+      <h3 class="family-title">My want list</h3>
+      <form id="want-search-form" class="search-row">
+        <input id="want-search-input" type="search" placeholder="Search Scryfall to add a want — e.g. Smaug" autocomplete="off">
+        <button class="btn btn-accent" type="submit">Search</button>
+      </form>
+      <p id="want-search-status" class="muted"></p>
+      <div id="want-search-results" class="search-results"></div>
+      <div id="my-wants" class="mini-list"></div>
+      <p id="spares-loading" class="muted">Loading…</p>
+      <p id="spares-error" class="error" hidden></p>
+    </section>
+
+    <!-- My profile -->
+    <section id="page-profile" class="page" hidden>
+      <div class="page-head"><h2>My profile</h2></div>
+      <form id="profile-form" class="profile-form">
+        <div class="profile-top">
+          <span id="profile-avatar-preview" class="avatar avatar-lg"></span>
+          <div>
+            <label class="btn btn-file">
+              Change picture
+              <input id="avatar-input" type="file" accept="image/*" hidden>
+            </label>
+            <p class="muted small">Shown next to your name across Spellbinder.</p>
+            <p id="avatar-status" class="muted small"></p>
+          </div>
+        </div>
+
+        <label class="field">
+          <span>Display name</span>
+          <input id="profile-name" type="text" maxlength="60" autocomplete="name">
+        </label>
+
+        <div class="field">
+          <span>Profile colour</span>
+          <div id="color-palette" class="palette"></div>
+          <label class="row-gap small muted">Custom:
+            <input id="profile-color-custom" type="color" value="#8b7cf6">
+          </label>
+        </div>
+
+        <label class="control check field-row">
+          <input type="checkbox" id="profile-public">
+          <span><strong>Public account</strong><br>
+          <span class="muted small">Public lets other members browse your public binders. Binders you keep private stay hidden either way.</span></span>
+        </label>
+
+        <button class="btn btn-accent" type="submit">Save profile</button>
+        <p id="profile-status" class="muted"></p>
+        <p id="profile-error" class="error" hidden></p>
+      </form>
+    </section>
+  </main>
+</div>
+
+<!-- New / edit binder dialog -->
+<dialog id="binder-dialog" class="dialog">
+  <form id="binder-form" method="dialog">
+    <h3 id="binder-dialog-title">New binder</h3>
+    <label class="field">
+      <span>Name</span>
+      <input id="binder-name" type="text" maxlength="80" required>
+    </label>
+    <label class="field">
+      <span>Type</span>
+      <select id="binder-kind">
+        <option value="collection">Collection</option>
+        <option value="custom">Custom</option>
+        <option value="set">Set binder</option>
+        <option value="showcase">★ Showcase</option>
+      </select>
+    </label>
+    <label class="field">
+      <span>Description <span class="muted">(optional)</span></span>
+      <input id="binder-desc" type="text" maxlength="200">
+    </label>
+    <label class="control check field-row">
+      <input type="checkbox" id="binder-public">
+      <span><strong>Public binder</strong><br>
+      <span class="muted small">Other members can browse this binder.</span></span>
+    </label>
+    <div class="row-gap dialog-actions">
+      <button class="btn btn-accent" id="binder-save" type="submit">Save binder</button>
+      <button class="btn btn-ghost" id="binder-cancel" type="button">Cancel</button>
+    </div>
+    <p id="binder-form-error" class="error" hidden></p>
+  </form>
+</dialog>
+
+<!-- New / edit deck dialog -->
+<dialog id="deck-dialog" class="dialog">
+  <form id="deck-form" method="dialog">
+    <h3 id="deck-dialog-title">New deck</h3>
+    <label class="field">
+      <span>Name</span>
+      <input id="deckf-name" type="text" maxlength="80" required>
+    </label>
+    <label class="field">
+      <span>Format <span class="muted">(optional)</span></span>
+      <input id="deckf-format" type="text" maxlength="40" placeholder="Commander, Standard, Modern…">
+    </label>
+    <label class="field">
+      <span>Notes <span class="muted">(optional)</span></span>
+      <input id="deckf-notes" type="text" maxlength="300">
+    </label>
+    <label class="control check field-row">
+      <input type="checkbox" id="deckf-public">
+      <span><strong>Public deck</strong><br>
+      <span class="muted small">Other members can view this deck on your profile.</span></span>
+    </label>
+    <div class="row-gap dialog-actions">
+      <button class="btn btn-accent" type="submit">Save deck</button>
+      <button class="btn btn-ghost" id="deck-cancel" type="button">Cancel</button>
+    </div>
+    <p id="deck-form-error" class="error" hidden></p>
+  </form>
+</dialog>
+
+<!-- Import decklist dialog -->
+<dialog id="import-dialog" class="dialog">
+  <form id="import-form" method="dialog">
+    <h3>Import a decklist</h3>
+    <p class="muted small">One card per line — "4 Lightning Bolt", "1 Sol Ring (C21) 263", or just a name. Lines starting "SB:" go to the sideboard; a "Commander:" line sets the commander board. Each name is matched to its cheapest printing on Scryfall.</p>
+    <label class="field">
+      <span>Decklist</span>
+      <textarea id="import-text" rows="12" placeholder="1 Sol Ring&#10;4 Lightning Bolt&#10;SB: 2 Negate"></textarea>
+    </label>
+    <div class="row-gap dialog-actions">
+      <button class="btn btn-accent" id="import-go" type="button">Import</button>
+      <button class="btn btn-ghost" id="import-cancel" type="button">Cancel</button>
+    </div>
+    <p id="import-status" class="muted"></p>
+  </form>
+</dialog>
+
+<script src="fingerprint.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
