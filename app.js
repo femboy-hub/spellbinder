@@ -18,6 +18,25 @@ const initialsOf = (name) => {
 const DEFAULT_COLOR = '#8b7cf6';
 const PALETTE = ['#ef4444', '#f97316', '#f59e0b', '#84cc16', '#22c55e', '#14b8a6',
   '#06b6d4', '#3b82f6', '#6366f1', '#a855f7', '#ec4899', '#64748b'];
+/* Member themes (Package v17): four independent colours — background,
+   panels, buttons/accent, text — stored as profiles.theme (jsonb, NULL =
+   never picked, site default applies). The 'default' preset's values are
+   the stylesheet :root defaults; picking it clears the saved theme. */
+const SITE_DEFAULT_THEME = { bg: '#14141c', surface: '#20202e', accent: DEFAULT_COLOR, text: '#f2f2f7' };
+const THEME_PRESETS = [
+  { id: 'default', name: 'Default', bg: '#14141c', surface: '#20202e', accent: '#8b7cf6', text: '#f2f2f7' },
+  { id: 'midnight', name: 'Midnight', bg: '#0c1424', surface: '#16233c', accent: '#2f6bd8', text: '#e9effc' },
+  { id: 'transpastel', name: 'Trans Pastel', bg: '#fdeef1', surface: '#ffffff', accent: '#5bcefa', text: '#3b2d5b' },
+  { id: 'transpasteldark', name: 'Trans Pastel Dark', bg: '#201428', surface: '#2e1d3d', accent: '#f5a9b8', text: '#f7e8f3' },
+  { id: 'forest', name: 'Forest', bg: '#0f1f16', surface: '#183324', accent: '#3fb68b', text: '#e6f4ec' },
+  { id: 'sunset', name: 'Sunset', bg: '#241118', surface: '#331a22', accent: '#fb923c', text: '#fdeee6' },
+  { id: 'mono', name: 'Mono', bg: '#101010', surface: '#1c1c1c', accent: '#d4d4d4', text: '#f5f5f5' }
+];
+const THEME_SWATCHES = {
+  bg: ['#14141c', '#0c1424', '#201428', '#0f1f16', '#241118', '#101010', '#fdeef1', '#f4f4f8'],
+  surface: ['#20202e', '#16233c', '#2e1d3d', '#183324', '#331a22', '#1c1c1c', '#ffffff', '#ececf2'],
+  text: ['#f2f2f7', '#e9effc', '#f7e8f3', '#e6f4ec', '#fdeee6', '#f5f5f5', '#3b2d5b', '#1c1c26']
+};
 const LANG_NAMES = { en: 'EN', ja: 'JA', de: 'DE', fr: 'FR', es: 'ES', it: 'IT', pt: 'PT', ko: 'KO', ru: 'RU', zhs: 'ZH-S', zht: 'ZH-T', he: 'HE', la: 'LA', grc: 'GR', ar: 'AR', sa: 'SA', px: 'PX', qya: 'QYA', tlh: 'TLH' };
 
 let noticeTimer = null;
@@ -60,6 +79,7 @@ const state = {
   editingDeckId: null,
   editingBinderId: null,
   selectedColor: DEFAULT_COLOR,
+  themeDraft: null,       // working copy of the member theme being edited
   migrationChecked: false
 };
 
@@ -80,6 +100,84 @@ function paintAvatar(el, profile, nameOverride) {
 function applyAccent() {
   const color = (state.profile && state.profile.profile_color) || DEFAULT_COLOR;
   document.documentElement.style.setProperty('--accent', color);
+}
+
+/* ---------------- member themes ---------------- */
+function hexToRgb(hex) {
+  const m = /^#?([0-9a-f]{6})$/i.exec(String(hex || '').trim());
+  if (!m) return null;
+  const n = parseInt(m[1], 16);
+  return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
+}
+function rgbToHex(r, g, b) {
+  const c = (v) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0');
+  return '#' + c(r) + c(g) + c(b);
+}
+function normHex(s) {
+  const c = hexToRgb(s);
+  return c ? rgbToHex(c.r, c.g, c.b) : null;
+}
+/* mix(a, b, p): per-channel linear interpolation, p% of the way to b. */
+function mixHex(a, b, p) {
+  const ca = hexToRgb(a), cb = hexToRgb(b);
+  if (!ca || !cb) return a;
+  const t = p / 100;
+  return rgbToHex(ca.r + (cb.r - ca.r) * t, ca.g + (cb.g - ca.g) * t, ca.b + (cb.b - ca.b) * t);
+}
+function relLuminance(hex) {
+  const c = hexToRgb(hex);
+  if (!c) return 0;
+  const f = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+  return 0.2126 * f(c.r) + 0.7152 * f(c.g) + 0.0722 * f(c.b);
+}
+function contrastRatio(a, b) {
+  const la = relLuminance(a), lb = relLuminance(b);
+  return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
+}
+
+/* The inline custom properties a saved theme overrides. When no theme
+   applies they are all removed so the stylesheet defaults — including the
+   prefers-color-scheme light block — behave exactly as before themes. */
+const THEME_VARS = ['--bg', '--bg-soft', '--surface', '--surface-2', '--border',
+  '--text', '--muted', '--accent', '--on-accent'];
+
+/* Normalise a profiles.theme value; null unless all four colours parse. */
+function themeFromProfile(profile) {
+  const t = profile && profile.theme;
+  if (!t || typeof t !== 'object') return null;
+  const bg = normHex(t.bg), surface = normHex(t.surface);
+  const accent = normHex(t.accent), text = normHex(t.text);
+  if (!bg || !surface || !accent || !text) return null;
+  return { preset: typeof t.preset === 'string' ? t.preset : null, bg, surface, accent, text };
+}
+
+function matchPresetId(t) {
+  if (!t) return null;
+  const hit = THEME_PRESETS.find(p => p.bg === t.bg && p.surface === t.surface
+    && p.accent === t.accent && p.text === t.text);
+  return hit ? hit.id : null;
+}
+
+/* Apply a theme site-wide (or, with null, clear every theme override and
+   fall back to the profile colour driving --accent, as before v17). */
+function applyTheme(theme) {
+  const root = document.documentElement;
+  if (!theme) {
+    THEME_VARS.forEach(v => root.style.removeProperty(v));
+    root.style.removeProperty('color-scheme');
+    applyAccent();
+    return;
+  }
+  root.style.setProperty('--bg', theme.bg);
+  root.style.setProperty('--surface', theme.surface);
+  root.style.setProperty('--accent', theme.accent);
+  root.style.setProperty('--text', theme.text);
+  root.style.setProperty('--bg-soft', mixHex(theme.bg, theme.surface, 50));
+  root.style.setProperty('--surface-2', mixHex(theme.surface, theme.text, 8));
+  root.style.setProperty('--border', mixHex(theme.surface, theme.text, 18));
+  root.style.setProperty('--muted', mixHex(theme.text, theme.bg, 45));
+  root.style.setProperty('--on-accent', relLuminance(theme.accent) > 0.45 ? '#1c1c26' : '#ffffff');
+  root.style.colorScheme = relLuminance(theme.bg) > 0.5 ? 'light' : 'dark';
 }
 
 /* ---------------- auth ---------------- */
@@ -1157,8 +1255,24 @@ function paintProfileForm() {
   $('#profile-name').value = p.display_name || '';
   $('#profile-public').checked = !!p.is_public;
   state.selectedColor = p.profile_color || DEFAULT_COLOR;
+  const saved = themeFromProfile(p);
+  if (saved) {
+    state.themeDraft = saved;
+    state.themeDraft.preset = matchPresetId(saved);
+    state.selectedColor = saved.accent;
+  } else {
+    state.themeDraft = {
+      preset: null,
+      bg: SITE_DEFAULT_THEME.bg,
+      surface: SITE_DEFAULT_THEME.surface,
+      accent: state.selectedColor,
+      text: SITE_DEFAULT_THEME.text
+    };
+  }
   $('#profile-color-custom').value = state.selectedColor;
   renderPalette();
+  syncThemeControls();
+  updateContrastWarning();
 }
 
 function renderPalette() {
@@ -1170,18 +1284,121 @@ function renderPalette() {
     b.className = 'swatch' + (color === state.selectedColor ? ' selected' : '');
     b.style.background = color;
     b.setAttribute('aria-label', 'Profile colour ' + color);
-    b.addEventListener('click', () => {
-      state.selectedColor = color;
-      $('#profile-color-custom').value = color;
-      renderPalette();
-      previewColor();
-    });
+    b.addEventListener('click', () => setThemeControl('accent', color));
     wrap.appendChild(b);
   });
 }
 
+function renderPresets() {
+  const wrap = $('#theme-presets');
+  if (!wrap) return;
+  wrap.innerHTML = '';
+  THEME_PRESETS.forEach(p => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'preset-chip' + (state.themeDraft && state.themeDraft.preset === p.id ? ' selected' : '');
+    const minis = [p.bg, p.surface, p.accent, p.text]
+      .map(c => '<span class="preset-mini" style="background:' + esc(c) + '"></span>').join('');
+    b.innerHTML = '<span class="preset-minis">' + minis + '</span>' + esc(p.name);
+    b.addEventListener('click', () => applyPreset(p.id));
+    wrap.appendChild(b);
+  });
+}
+
+function renderThemeSwatches(wrap, colors, current, key) {
+  if (!wrap) return;
+  wrap.innerHTML = '';
+  colors.forEach(color => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'swatch' + (color === current ? ' selected' : '');
+    b.style.background = color;
+    b.setAttribute('aria-label', key + ' colour ' + color);
+    b.addEventListener('click', () => setThemeControl(key, color));
+    wrap.appendChild(b);
+  });
+}
+
+/* Push the draft's values into every theme control (chips, swatch rows,
+   colour inputs, hex fields). */
+function syncThemeControls() {
+  const d = state.themeDraft;
+  if (!d) return;
+  renderPresets();
+  renderThemeSwatches($('#theme-bg-palette'), THEME_SWATCHES.bg, d.bg, 'bg');
+  renderThemeSwatches($('#theme-surface-palette'), THEME_SWATCHES.surface, d.surface, 'surface');
+  renderThemeSwatches($('#theme-text-palette'), THEME_SWATCHES.text, d.text, 'text');
+  $('#theme-bg-custom').value = d.bg;
+  $('#theme-surface-custom').value = d.surface;
+  $('#theme-text-custom').value = d.text;
+  $('#theme-bg-hex').value = d.bg;
+  $('#theme-surface-hex').value = d.surface;
+  $('#theme-text-hex').value = d.text;
+  $('#theme-accent-hex').value = d.accent;
+  $('#profile-color-custom').value = d.accent;
+}
+
+function setThemeControl(key, value) {
+  const hex = normHex(value);
+  if (!hex || !state.themeDraft) return;
+  state.themeDraft[key] = hex;
+  state.themeDraft.preset = matchPresetId(state.themeDraft);
+  if (key === 'accent') state.selectedColor = hex;
+  syncThemeControls();
+  renderPalette();
+  previewColor();
+  updateContrastWarning();
+}
+
+function applyPreset(id) {
+  if (id === 'default') { resetThemeDraft(); return; }
+  const p = THEME_PRESETS.find(x => x.id === id);
+  if (!p) return;
+  state.themeDraft = { preset: p.id, bg: p.bg, surface: p.surface, accent: p.accent, text: p.text };
+  state.selectedColor = p.accent;
+  syncThemeControls();
+  renderPalette();
+  previewColor();
+  updateContrastWarning();
+}
+
+function resetThemeDraft() {
+  state.themeDraft = {
+    preset: 'default',
+    bg: SITE_DEFAULT_THEME.bg,
+    surface: SITE_DEFAULT_THEME.surface,
+    accent: SITE_DEFAULT_THEME.accent,
+    text: SITE_DEFAULT_THEME.text
+  };
+  state.selectedColor = state.themeDraft.accent;
+  syncThemeControls();
+  renderPalette();
+  previewColor();
+  updateContrastWarning();
+}
+
+/* Warning only — a low-contrast pick is the member's call, never blocked. */
+function updateContrastWarning() {
+  const el = $('#theme-contrast-warning');
+  if (!el) return;
+  const d = state.themeDraft;
+  if (!d) { el.hidden = true; return; }
+  el.hidden = !(contrastRatio(d.text, d.bg) < 4.5 || contrastRatio(d.text, d.surface) < 4.5);
+}
+
 function previewColor() {
-  document.documentElement.style.setProperty('--accent', state.selectedColor);
+  const d = state.themeDraft;
+  if (d) state.selectedColor = d.accent;
+  if (d && matchPresetId(d) !== 'default') {
+    applyTheme(d);
+  } else {
+    // Default (or no) draft: clear the theme overrides so the stylesheet
+    // defaults rule, and preview just the accent colour.
+    const root = document.documentElement;
+    THEME_VARS.forEach(v => { if (v !== '--accent') root.style.removeProperty(v); });
+    root.style.removeProperty('color-scheme');
+    root.style.setProperty('--accent', state.selectedColor);
+  }
   const preview = Object.assign({}, state.profile, { profile_color: state.selectedColor });
   paintAvatar($('#profile-avatar-preview'), preview);
 }
@@ -1189,9 +1406,19 @@ function previewColor() {
 async function saveProfile(ev) {
   ev.preventDefault();
   $('#profile-error').hidden = true;
+  const d = state.themeDraft;
+  const draftPreset = d ? matchPresetId(d) : 'default';
+  // A draft matching Default saves as a NULL theme (site default applies);
+  // the accent also lands in profile_color so avatars and member-page
+  // accents stay in sync with the theme.
+  const theme = (!d || draftPreset === 'default') ? null : {
+    preset: draftPreset,
+    bg: d.bg, surface: d.surface, accent: d.accent, text: d.text
+  };
   const payload = {
     display_name: $('#profile-name').value.trim() || 'Collector',
     profile_color: state.selectedColor,
+    theme: theme,
     is_public: $('#profile-public').checked
   };
   try {
@@ -1200,7 +1427,7 @@ async function saveProfile(ev) {
     if (error) throw error;
     state.profile = data;
     paintHeader();
-    applyAccent();
+    applyTheme(themeFromProfile(data));
     paintProfileForm();
     $('#profile-status').textContent = 'Saved.';
     showNotice('Profile saved');
@@ -1322,7 +1549,7 @@ async function enterApp() {
   } catch (err) {
     showNotice('Could not load your profile: ' + friendlyError(err), 7000);
   }
-  applyAccent();
+  applyTheme(themeFromProfile(state.profile));
   paintHeader();
   paintProfileForm();
   await claimMigration();
@@ -3292,10 +3519,23 @@ document.addEventListener('DOMContentLoaded', () => {
   $('#profile-form').addEventListener('submit', saveProfile);
   $('#avatar-input').addEventListener('change', (e) => uploadAvatar(e.target.files[0]));
   $('#profile-color-custom').addEventListener('input', (e) => {
-    state.selectedColor = e.target.value;
-    renderPalette();
-    previewColor();
+    setThemeControl('accent', e.target.value);
   });
+  $('#theme-bg-custom').addEventListener('input', (e) => setThemeControl('bg', e.target.value));
+  $('#theme-surface-custom').addEventListener('input', (e) => setThemeControl('surface', e.target.value));
+  $('#theme-text-custom').addEventListener('input', (e) => setThemeControl('text', e.target.value));
+  const bindHex = (sel, key) => {
+    $(sel).addEventListener('change', (e) => {
+      const hex = normHex(e.target.value);
+      if (hex) setThemeControl(key, hex);
+      else syncThemeControls(); // not a colour: put the current value back
+    });
+  };
+  bindHex('#theme-bg-hex', 'bg');
+  bindHex('#theme-surface-hex', 'surface');
+  bindHex('#theme-text-hex', 'text');
+  bindHex('#theme-accent-hex', 'accent');
+  $('#theme-reset').addEventListener('click', resetThemeDraft);
 
   boot();
 });

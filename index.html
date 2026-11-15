@@ -365,11 +365,49 @@
         </label>
 
         <div class="field">
-          <span>Profile colour</span>
-          <div id="color-palette" class="palette"></div>
-          <label class="row-gap small muted">Custom:
-            <input id="profile-color-custom" type="color" value="#8b7cf6">
-          </label>
+          <span>My theme</span>
+          <div id="theme-presets" class="preset-row"></div>
+
+          <div class="theme-control">
+            <span class="small muted">Background</span>
+            <div id="theme-bg-palette" class="palette palette-sm"></div>
+            <label class="row-gap small muted">Custom:
+              <input id="theme-bg-custom" type="color" value="#14141c">
+              <input id="theme-bg-hex" class="hex-input" type="text" value="#14141c" maxlength="7" spellcheck="false" aria-label="Background hex colour">
+            </label>
+          </div>
+
+          <div class="theme-control">
+            <span class="small muted">Panels</span>
+            <div id="theme-surface-palette" class="palette palette-sm"></div>
+            <label class="row-gap small muted">Custom:
+              <input id="theme-surface-custom" type="color" value="#20202e">
+              <input id="theme-surface-hex" class="hex-input" type="text" value="#20202e" maxlength="7" spellcheck="false" aria-label="Panels hex colour">
+            </label>
+          </div>
+
+          <div class="theme-control">
+            <span class="small muted">Buttons &amp; accent</span>
+            <div id="color-palette" class="palette"></div>
+            <label class="row-gap small muted">Custom:
+              <input id="profile-color-custom" type="color" value="#8b7cf6">
+              <input id="theme-accent-hex" class="hex-input" type="text" value="#8b7cf6" maxlength="7" spellcheck="false" aria-label="Accent hex colour">
+            </label>
+          </div>
+
+          <div class="theme-control">
+            <span class="small muted">Text</span>
+            <div id="theme-text-palette" class="palette palette-sm"></div>
+            <label class="row-gap small muted">Custom:
+              <input id="theme-text-custom" type="color" value="#f2f2f7">
+              <input id="theme-text-hex" class="hex-input" type="text" value="#f2f2f7" maxlength="7" spellcheck="false" aria-label="Text hex colour">
+            </label>
+          </div>
+
+          <p id="theme-contrast-warning" class="theme-warning" hidden>Heads up: your text colour is hard to read on your background/panels (under 4.5:1). You can keep it — it's your call.</p>
+          <div>
+            <button type="button" id="theme-reset" class="btn">Reset to default</button>
+          </div>
         </div>
 
         <label class="control check field-row">
