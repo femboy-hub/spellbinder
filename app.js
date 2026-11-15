@@ -27,7 +27,7 @@ const THEME_PRESETS = [
   { id: 'default', name: 'Default', bg: '#14141c', surface: '#20202e', accent: '#8b7cf6', text: '#f2f2f7' },
   { id: 'midnight', name: 'Midnight', bg: '#0c1424', surface: '#16233c', accent: '#2f6bd8', text: '#e9effc' },
   { id: 'transpastel', name: 'Trans Pastel', bg: '#fdeef1', surface: '#ffffff', accent: '#5bcefa', text: '#3b2d5b' },
-  { id: 'transpasteldark', name: 'Trans Pastel Dark', bg: '#201428', surface: '#2e1d3d', accent: '#f5a9b8', text: '#f7e8f3' },
+  { id: 'transpasteldark', name: 'Trans Pastel Dark', bg: '#201a38', surface: '#2d2450', accent: '#5bcefa', text: '#fdeef1' },
   { id: 'forest', name: 'Forest', bg: '#0f1f16', surface: '#183324', accent: '#3fb68b', text: '#e6f4ec' },
   { id: 'sunset', name: 'Sunset', bg: '#241118', surface: '#331a22', accent: '#fb923c', text: '#fdeee6' },
   { id: 'mono', name: 'Mono', bg: '#101010', surface: '#1c1c1c', accent: '#d4d4d4', text: '#f5f5f5' }
