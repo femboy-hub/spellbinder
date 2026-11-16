@@ -180,6 +180,10 @@
     <!-- Trades -->
     <section id="page-trades" class="page" hidden>
       <div class="page-head"><h2>Trades</h2></div>
+      <div id="trades-notify-strip" class="notify-strip" hidden>
+        <span>Get notified when a trade comes in</span>
+        <button type="button" id="trades-notify-enable" class="btn btn-accent">Enable</button>
+      </div>
       <p class="muted">Start a trade from a member's page. When a trade is accepted, the cards move between your Main Collections automatically.</p>
       <h3 class="family-title">Open trades</h3>
       <div id="open-trades"></div>
@@ -408,6 +412,15 @@
           <div>
             <button type="button" id="theme-reset" class="btn">Reset to default</button>
           </div>
+        </div>
+
+        <div class="field">
+          <span>Notifications</span>
+          <div class="notify-row">
+            <span class="small">Trade notifications</span>
+            <button type="button" id="notify-toggle" class="btn">Turn on</button>
+          </div>
+          <p id="notify-status" class="muted small notify-status"></p>
         </div>
 
         <label class="control check field-row">

@@ -1273,6 +1273,7 @@ function paintProfileForm() {
   renderPalette();
   syncThemeControls();
   updateContrastWarning();
+  paintPushState();
 }
 
 function renderPalette() {
@@ -1535,6 +1536,141 @@ window.addEventListener('appinstalled', () => {
   paintInstallButtons();
 });
 
+/* ---------------- push notifications (Package v18) ----------------
+   Trade-request Web Push. Design: NOTIFICATIONS-DESIGN.md. A member
+   opts in per browser/device from the Profile page (or the Trades
+   strip); the subscription is stored in push_subscriptions and a
+   trades INSERT trigger calls the send-push Edge Function. Notification
+   permission is requested ONLY inside enablePush(), which runs only
+   from an explicit tap — never on load. */
+const pushSupported = ('serviceWorker' in navigator) && ('PushManager' in window) && ('Notification' in window);
+let pushSub = undefined; // undefined = not checked yet, null = no subscription in this browser
+
+function urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const rawData = window.atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+  for (let i = 0; i < rawData.length; ++i) outputArray[i] = rawData.charCodeAt(i);
+  return outputArray;
+}
+
+async function refreshPushSub() {
+  if (!pushSupported) { pushSub = null; return null; }
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    pushSub = await reg.pushManager.getSubscription();
+  } catch (e) { pushSub = null; }
+  return pushSub;
+}
+
+function paintPushState() {
+  const btn = $('#notify-toggle');
+  const status = $('#notify-status');
+  if (btn && status) {
+    if (!pushSupported) {
+      btn.hidden = true;
+      status.textContent = "Notifications aren't available in this browser — open Spellbinder in Chrome or install it to turn them on.";
+    } else if (Notification.permission === 'denied') {
+      btn.hidden = true;
+      status.textContent = 'Blocked by your browser — allow notifications in the site settings to turn this on.';
+    } else if (pushSub) {
+      btn.hidden = false;
+      btn.textContent = 'Turn off';
+      status.textContent = 'On — this device will get a push when a trade request comes in.';
+    } else {
+      btn.hidden = false;
+      btn.textContent = 'Turn on';
+      status.textContent = 'Off — turn on to get a push on this device when a trade request comes in.';
+    }
+  }
+  const strip = $('#trades-notify-strip');
+  if (strip) {
+    strip.hidden = !(pushSupported && Notification.permission !== 'denied' && !pushSub);
+  }
+}
+
+async function savePushSubscription(sub) {
+  const keys = (sub.toJSON() && sub.toJSON().keys) || {};
+  const { error } = await sb.from('push_subscriptions').upsert({
+    user_id: state.user.id,
+    endpoint: sub.endpoint,
+    p256dh: keys.p256dh || '',
+    auth: keys.auth || '',
+    user_agent: navigator.userAgent,
+    last_seen_at: new Date().toISOString()
+  }, { onConflict: 'endpoint' });
+  if (error) throw error;
+}
+
+async function subscribePush() {
+  const reg = await navigator.serviceWorker.ready;
+  let sub = await reg.pushManager.getSubscription();
+  if (!sub) {
+    sub = await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(cfg.vapidPublicKey)
+    });
+  }
+  return sub;
+}
+
+async function enablePush() {
+  if (!pushSupported) { paintPushState(); return; }
+  try {
+    const permission = await Notification.requestPermission();
+    if (permission !== 'granted') {
+      if (permission === 'denied') showNotice('Notifications are blocked — allow them in your browser site settings to turn this on.', 6000);
+      paintPushState();
+      return;
+    }
+    pushSub = await subscribePush();
+    await savePushSubscription(pushSub);
+    showNotice('Trade notifications on for this device');
+  } catch (err) {
+    showNotice('Could not turn on notifications: ' + friendlyError(err), 6000);
+  }
+  paintPushState();
+}
+
+async function disablePush() {
+  try {
+    const sub = pushSub || (await refreshPushSub());
+    if (sub) {
+      const endpoint = sub.endpoint;
+      try { await sub.unsubscribe(); } catch (e) { /* already gone is fine */ }
+      const { error } = await sb.from('push_subscriptions').delete().eq('endpoint', endpoint);
+      if (error) throw error;
+    }
+    pushSub = null;
+    showNotice('Trade notifications off for this device');
+  } catch (err) {
+    showNotice('Could not turn off notifications: ' + friendlyError(err), 6000);
+  }
+  paintPushState();
+}
+
+/* On entering the app signed-in: keep this browser's subscription row
+   fresh, and silently re-subscribe when permission was granted earlier
+   but the subscription is gone (browsers rotate them). Never prompts —
+   requestPermission lives only in enablePush(). Best-effort: a push
+   problem must never block or break entering the app. */
+async function reconcilePush() {
+  if (!state.user) { paintPushState(); return; }
+  if (!pushSupported) { pushSub = null; paintPushState(); return; }
+  try {
+    if (Notification.permission === 'granted') {
+      pushSub = await subscribePush();
+      if (pushSub) {
+        try { await savePushSubscription(pushSub); } catch (e) { /* refresh is best-effort */ }
+      }
+    } else {
+      await refreshPushSub();
+    }
+  } catch (e) { /* push is a tap on the shoulder, never a blocker */ }
+  paintPushState();
+}
+
 /* ---------------- header / boot ---------------- */
 function paintHeader() {
   paintAvatar($('#header-avatar'), state.profile);
@@ -1550,6 +1686,7 @@ async function enterApp() {
     showNotice('Could not load your profile: ' + friendlyError(err), 7000);
   }
   applyTheme(themeFromProfile(state.profile));
+  reconcilePush();
   paintHeader();
   paintProfileForm();
   await claimMigration();
@@ -3425,6 +3562,8 @@ async function onPhotoFile(file) {
 
 document.addEventListener('DOMContentLoaded', () => {
   $('#btn-google').addEventListener('click', signInWithGoogle);
+  $('#notify-toggle').addEventListener('click', () => { if (pushSub) disablePush(); else enablePush(); });
+  $('#trades-notify-enable').addEventListener('click', enablePush);
   $$('.install-btn').forEach(b => b.addEventListener('click', onInstallClick));
   $$('.share-btn').forEach(b => b.addEventListener('click', () => shareSite(b)));
   $('#btn-signout').addEventListener('click', async () => { await sb.auth.signOut(); enterAuth(); });
@@ -3435,7 +3574,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (nav !== 'lookup') stopLive();
     if (nav === 'home') { loadMyBinders(); showPage('home'); }
     if (nav === 'members') { loadMembers(); showPage('members'); }
-    if (nav === 'trades') { loadTrades(); showPage('trades'); }
+    if (nav === 'trades') { loadTrades(); paintPushState(); showPage('trades'); }
     if (nav === 'decks') { loadDecks(); showPage('decks'); }
     if (nav === 'lookup') { showPage('lookup'); }
     if (nav === 'spares') { loadSpares(); showPage('spares'); }
