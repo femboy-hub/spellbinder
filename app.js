@@ -10,6 +10,13 @@ const esc = (s) => String(s == null ? '' : s)
   .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
   .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 const money = (n) => '$' + (Number(n) || 0).toFixed(2);
+/* A single card's own unit price. A missing price (null — e.g. a
+   scanner-filed card whose price the nightly refresh hasn't filled in
+   yet, v19) must never render as a fake $0.00: show "No price" instead.
+   Totals keep using money() — $0.00 is a legitimate total. The optional
+   suffix (e.g. ' ea') is appended only when there is a price. */
+const priceLabel = (n, suffix) => (n == null || n === '' || Number.isNaN(Number(n)))
+  ? 'No price' : money(n) + (suffix || '');
 const initialsOf = (name) => {
   const parts = String(name || '?').trim().split(/\s+/).filter(Boolean);
   if (!parts.length) return '?';
@@ -661,7 +668,7 @@ function cardTile(c) {
       '<div class="card-name">' + esc(displayName) + '</div>' +
       '<div class="card-sub">' + esc(c.set_name || '') + (c.collector_number ? ' · #' + esc(c.collector_number) : '') + '</div>' +
       '<div class="card-tags">' + finishTag + langBadge + '</div>' +
-      '<div class="card-price">' + money(c.unit_price) +
+      '<div class="card-price">' + priceLabel(c.unit_price) +
         (c.price_source ? ' <span class="src">' + esc(c.price_source) + '</span>' : '') + '</div>' +
       qtyHTML +
     '</div>';
@@ -1819,7 +1826,7 @@ async function loadMemberExtras(profile, publicBinders) {
             (c.image_uri ? '<img src="' + esc(c.image_uri) + '" alt="">' : '') +
             '<span class="grow"><span class="nm">' + (wanted ? '<span class="flag-want">★ </span>' : '') + esc(c.printed_name && c.lang !== 'en' ? c.printed_name : c.name) + '</span><br>' +
             '<span class="sub">' + esc(c.set_name || '') + (c.collector_number ? ' · #' + esc(c.collector_number) : '') + (c.is_foil ? ' · Foil' : '') + '</span></span>' +
-            '<span class="sub">' + (c.quantity - 1) + ' spare · ' + money(c.unit_price) + ' ea</span>';
+            '<span class="sub">' + (c.quantity - 1) + ' spare · ' + priceLabel(c.unit_price, ' ea') + '</span>';
           wrap.appendChild(row);
         });
         sparesBlock.hidden = false;
@@ -1917,7 +1924,7 @@ function tradeSideHTML(items, ownerId, label) {
       (i.image_uri ? '<img src="' + esc(i.image_uri) + '" alt="">' : '') +
       '<span class="grow"><span class="nm">' + esc(i.name) + '</span><br>' +
       '<span class="sub">' + esc(i.set_name || '') + (i.collector_number ? ' · #' + esc(i.collector_number) : '') + (i.is_foil ? ' · Foil' : '') + '</span></span>' +
-      '<span class="sub">×' + (i.quantity || 1) + ' · ' + money((Number(i.unit_price) || 0) * (i.quantity || 1)) + '</span>' +
+      '<span class="sub">×' + (i.quantity || 1) + ' · ' + (i.unit_price == null ? 'No price' : money((Number(i.unit_price) || 0) * (i.quantity || 1))) + '</span>' +
     '</div>').join('')
     : '<p class="muted small">Nothing</p>';
   return '<div class="trade-side"><h4>' + esc(label) + ' — ' + money(total) + '</h4>' + rows + '</div>';
@@ -1940,7 +1947,7 @@ function tradeCard(t, items, isOpen) {
   let actions = '';
   if (isOpen) {
     if (!iAmProposer) actions = '<button type="button" class="btn btn-accent" data-act="accept">Accept — swap the cards</button> <button type="button" class="btn btn-ghost" data-act="counter">↩️ Edit / Counter</button> <button type="button" class="btn btn-danger" data-act="decline">Decline</button>';
-    else actions = '<span class="muted small">Waiting for ' + esc(otherName) + '…</span> <button type="button" class="btn btn-ghost" data-act="cancel">Cancel proposal</button>';
+    else actions = '<span class="muted small">Waiting for ' + esc(otherName) + '…</span> <button type="button" class="btn btn-danger" data-act="cancel">Cancel trade</button>';
   }
   card.innerHTML =
     '<div class="trade-head"><span class="avatar"></span><strong>' + esc(otherName) + '</strong>' + chip +
@@ -2147,7 +2154,7 @@ function composePickRow(card, side) {
     (card.image_uri ? '<img src="' + esc(card.image_uri) + '" alt="">' : '') +
     '<span class="grow"><span class="nm">' + esc(card.printed_name && card.lang !== 'en' ? card.printed_name : card.name) + '</span><br>' +
     '<span class="sub">' + esc(card.set_name || '') + (card.collector_number ? ' · #' + esc(card.collector_number) : '') +
-      (card.is_foil ? ' · Foil' : '') + (binderName ? ' · ' + esc(binderName) : '') + ' · ' + money(card.unit_price) + ' · ' + card.available + ' available</span></span>' +
+      (card.is_foil ? ' · Foil' : '') + (binderName ? ' · ' + esc(binderName) : '') + ' · ' + priceLabel(card.unit_price) + ' · ' + card.available + ' available</span></span>' +
     '<span class="qty-row"><button type="button" class="qty-btn" data-d="-1">−</button>' +
     '<span class="qty-num">×' + qty + '</span>' +
     '<button type="button" class="qty-btn" data-d="1">+</button></span>';
@@ -2333,7 +2340,7 @@ async function renderMySpares() {
       '<span class="grow"><span class="nm">' + (wanted ? '<span class="flag-want">★ Wanted by ' + esc(aimName) + ' — </span>' : '') +
         esc(c.printed_name && c.lang !== 'en' ? c.printed_name : c.name) + '</span><br>' +
       '<span class="sub">' + esc(c.set_name || '') + (c.collector_number ? ' · #' + esc(c.collector_number) : '') + (c.is_foil ? ' · Foil' : '') + '</span></span>' +
-      '<span class="sub">' + (c.quantity - 1) + ' spare · ' + money(c.unit_price) + ' ea</span>';
+      '<span class="sub">' + (c.quantity - 1) + ' spare · ' + priceLabel(c.unit_price, ' ea') + '</span>';
     wrap.appendChild(row);
   });
   $('#spares-empty').hidden = spares.length > 0;
@@ -2574,6 +2581,19 @@ function deckCardPrice(c, live) {
   return Number(c.unit_price) || 0;
 }
 
+/* True when a price is actually known for this deck card (live or
+   stored) — deckCardPrice() alone can't say, since it falls back to 0
+   for the totals. Used by the row display so an unpriced deck card
+   reads "No price" instead of a fake $0.00 (v19). */
+function deckCardHasPrice(c, live) {
+  const p = live && live[c.scryfall_id];
+  if (p) {
+    const v = c.is_foil ? (p.usd_foil != null ? p.usd_foil : p.usd) : p.usd;
+    if (v != null) return true;
+  }
+  return c.unit_price != null;
+}
+
 async function loadDeckCards() {
   const d = state.currentDeck;
   if (!d) return;
@@ -2670,7 +2690,7 @@ function deckCardRow(c, live, owned) {
     (c.image_uri ? '<img src="' + esc(c.image_uri) + '" alt="">' : '') +
     '<span class="grow"><span class="nm">' + esc(c.printed_name && c.lang !== 'en' ? c.printed_name : c.name) + '</span><br>' +
     '<span class="sub">' + esc(c.set_name || '') + (c.collector_number ? ' · #' + esc(c.collector_number) : '') +
-      (c.is_foil ? ' · Foil' : '') + ' · ' + money(price) + ' ea · ' + ownLine + '</span></span>' + controls;
+      (c.is_foil ? ' · Foil' : '') + ' · ' + (deckCardHasPrice(c, live) ? money(price) + ' ea' : 'No price') + ' · ' + ownLine + '</span></span>' + controls;
   if (!state.deckReadonly) {
     $$('.qty-btn', row).forEach(btn => {
       btn.addEventListener('click', () => changeDeckQty(c, Number(btn.getAttribute('data-d'))));
