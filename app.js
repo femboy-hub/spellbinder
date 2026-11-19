@@ -677,7 +677,53 @@ function cardTile(c) {
       btn.addEventListener('click', () => changeQuantity(c, btn.getAttribute('data-act') === 'inc' ? 1 : -1));
     });
   }
+  // v20: tapping a card (anywhere except the quantity buttons) enlarges it with its info.
+  tile.addEventListener('click', (e) => {
+    if (e.target.closest('.qty-btn')) return;
+    showCardDetail(c);
+  });
   return tile;
+}
+
+// v20: card detail — enlarged picture plus the card's info, from the binder row's own data.
+function largeImageUri(uri) {
+  return uri ? String(uri).replace('/normal/', '/large/') : '';
+}
+
+function showCardDetail(c) {
+  const dlg = $('#card-dialog');
+  if (!dlg) return;
+  const displayName = c.printed_name && c.lang !== 'en' ? c.printed_name : c.name;
+  $('#cd-name').textContent = displayName || '';
+  const sub = [c.set_name || c.set_code || '', c.collector_number ? '#' + c.collector_number : ''].filter(Boolean).join(' · ');
+  $('#cd-sub').textContent = sub;
+  const img = $('#cd-img');
+  if (c.image_uri) {
+    img.src = largeImageUri(c.image_uri);
+    img.alt = c.name || '';
+    img.hidden = false;
+  } else {
+    img.hidden = true;
+    img.removeAttribute('src');
+  }
+  const qty = c.quantity || 1;
+  const rows = [];
+  if (c.type_line) rows.push(['Type', c.type_line]);
+  if (c.rarity) rows.push(['Rarity', String(c.rarity).charAt(0).toUpperCase() + String(c.rarity).slice(1)]);
+  rows.push(['Finish', c.is_foil ? 'Foil' : 'Non-foil']);
+  if (c.lang) rows.push(['Language', LANG_NAMES[c.lang] || String(c.lang).toUpperCase()]);
+  rows.push(['Quantity in binder', '×' + qty]);
+  if (c.unit_price != null && c.unit_price !== '' && !Number.isNaN(Number(c.unit_price))) {
+    rows.push(['Price each', priceLabel(c.unit_price) + (c.price_source ? ' (' + c.price_source + ')' : '')]);
+    if (qty > 1) rows.push(['Total for ×' + qty, money(Number(c.unit_price) * qty)]);
+  } else {
+    rows.push(['Price', priceLabel(c.unit_price)]);
+  }
+  if (c.added_at) rows.push(['Added', new Date(c.added_at).toLocaleDateString()]);
+  $('#cd-rows').innerHTML = rows.map(r =>
+    '<div class="cd-row"><span class="cd-k">' + esc(r[0]) + '</span><span class="cd-v">' + esc(r[1]) + '</span></div>'
+  ).join('');
+  if (!dlg.open) dlg.showModal();
 }
 
 async function changeQuantity(card, delta) {
@@ -3645,6 +3691,9 @@ document.addEventListener('DOMContentLoaded', () => {
   $('#btn-new-deck').addEventListener('click', () => openDeckDialog(null));
   $('#deck-form').addEventListener('submit', saveDeck);
   $('#deck-cancel').addEventListener('click', () => $('#deck-dialog').close());
+  // v20: card detail dialog — Close button and backdrop tap both dismiss it.
+  $('#cd-close').addEventListener('click', () => $('#card-dialog').close());
+  $('#card-dialog').addEventListener('click', (e) => { if (e.target === e.currentTarget) e.currentTarget.close(); });
   $('#btn-edit-deck').addEventListener('click', () => openDeckDialog(state.currentDeck));
   $('#btn-delete-deck').addEventListener('click', deleteCurrentDeck);
   $('#btn-import-deck').addEventListener('click', () => {

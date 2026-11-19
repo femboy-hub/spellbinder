@@ -517,6 +517,19 @@
   </form>
 </dialog>
 
+<!-- Card detail dialog (v20): tap a card in a binder to enlarge it and see its info -->
+<dialog id="card-dialog" class="dialog card-dialog">
+  <div class="card-detail">
+    <img id="cd-img" class="card-detail-img" alt="">
+    <h3 id="cd-name"></h3>
+    <p id="cd-sub" class="muted"></p>
+    <div id="cd-rows" class="cd-rows"></div>
+    <div class="row-gap dialog-actions">
+      <button class="btn btn-ghost" id="cd-close" type="button">Close</button>
+    </div>
+  </div>
+</dialog>
+
 <script src="fingerprint.js"></script>
 <script src="app.js"></script>
 </body>
