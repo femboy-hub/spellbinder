@@ -37,7 +37,12 @@ async function loadFxRates() {
   try {
     const r = await fetch('https://open.er-api.com/v6/latest/USD');
     const j = await r.json();
-    if (j && j.rates && j.rates.EUR && j.rates.JPY) fxRates = { EUR: j.rates.EUR, JPY: j.rates.JPY };
+    if (j && j.rates && j.rates.EUR && j.rates.JPY) { fxRates = { EUR: j.rates.EUR, JPY: j.rates.JPY }; return; }
+  } catch (e) { /* fall through to the backup source */ }
+  try {
+    const r2 = await fetch('https://api.frankfurter.app/latest?from=USD&to=EUR,JPY');
+    const j2 = await r2.json();
+    if (j2 && j2.rates && j2.rates.EUR && j2.rates.JPY) fxRates = { EUR: j2.rates.EUR, JPY: j2.rates.JPY };
   } catch (e) { /* offline: displays stay in USD until rates load */ }
 }
 async function initPriceMarket() {
@@ -807,19 +812,29 @@ async function fillCardMarkets(c, token) {
       if (fxRates && fxRates.EUR) v += ' (≈ ' + usdFmt(Number(cm) / fxRates.EUR) + ')';
       rows.push(['Cardmarket', v]);
     }
-    if (tcg != null && cm != null && fxRates && fxRates.EUR) {
-      const cmUsd = Number(cm) / fxRates.EUR;
-      const lo = Math.min(Number(tcg), cmUsd), hi = Math.max(Number(tcg), cmUsd);
-      /* v22 (Jakson's call): the range shows whenever both sites price the
-         card — the app tile's "only when they disagree wildly" rule made
-         it invisible on most cards in this dialog. */
-      if (hi > lo) {
-        const loName = Number(tcg) <= cmUsd ? 'TCGplayer' : 'Cardmarket';
-        const hiName = loName === 'TCGplayer' ? 'Cardmarket' : 'TCGplayer';
-        rows.push(['Price range', usdFmt(lo) + ' – ' + usdFmt(hi) + ' (' + loName + ' low · ' + hiName + ' high)']);
-      } else {
-        rows.push(['Price range', usdFmt(lo) + ' (both sites agree)']);
-      }
+    /* v23: the range is built from every real price point — TCGplayer
+       live, Cardmarket live (converted), and the binder's stored price
+       when it came from a different market (Hareruya, for Japanese
+       printings Scryfall doesn't price at all). When only one market
+       prices the printing, a visible row says so — silence read as
+       "broken" to Jakson on 2026-11-19. */
+    const pts = [];
+    if (tcg != null) pts.push({ name: 'TCGplayer', usd: Number(tcg) });
+    const cmNoFx = cm != null && !(fxRates && fxRates.EUR);
+    if (cm != null && !cmNoFx) pts.push({ name: 'Cardmarket', usd: Number(cm) / fxRates.EUR });
+    const storedSrc = { japanese_market: 'Hareruya' }[c.price_source] || null;
+    if (storedSrc && c.unit_price != null && !pts.some(p => Math.abs(p.usd - Number(c.unit_price)) < 0.011)) {
+      pts.push({ name: storedSrc, usd: Number(c.unit_price) });
+    }
+    if (pts.length >= 2) {
+      const lo = pts.reduce((a, b) => b.usd < a.usd ? b : a);
+      const hi = pts.reduce((a, b) => b.usd > a.usd ? b : a);
+      if (hi.usd > lo.usd) rows.push(['Price range', usdFmt(lo.usd) + ' – ' + usdFmt(hi.usd) + ' (' + lo.name + ' low · ' + hi.name + ' high)']);
+      else rows.push(['Price range', usdFmt(lo.usd) + ' (sites agree)']);
+    } else if (pts.length === 1 && !cmNoFx) {
+      rows.push(['Price range', 'Only ' + pts[0].name + ' prices this printing']);
+    } else if (pts.length === 0 && c.unit_price != null) {
+      rows.push(['Price range', 'Only one price found for this printing']);
     }
     if (rows.length) appendCdRows(rows, token);
   } catch (e) { /* offline or Scryfall hiccup: base rows already shown */ }
