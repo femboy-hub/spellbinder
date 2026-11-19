@@ -9,7 +9,46 @@ const $$ = (sel, root) => Array.from((root || document).querySelectorAll(sel));
 const esc = (s) => String(s == null ? '' : s)
   .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
   .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-const money = (n) => '$' + (Number(n) || 0).toFixed(2);
+/* Price display market (v21 — Jakson's Nov 10 idea, ported from the Card
+   Binders app): profiles.price_market picks which market's money prices
+   are shown in. Stored prices stay USD; EUR/JPY display converts at the
+   day's FX rate (fetched once per session) and the profile control says
+   so. Source prices inside the card dialog are always shown natively. */
+const MARKETS = {
+  usd_tcgplayer: { cur: 'USD', sym: '$', label: 'USD · TCGplayer' },
+  eur_cardmarket: { cur: 'EUR', sym: '€', label: 'EUR · Cardmarket' },
+  jpy_hareruya: { cur: 'JPY', sym: '¥', label: 'JPY · Hareruya' }
+};
+let fxRates = null; // { EUR: per-USD, JPY: per-USD }
+function priceMarket() {
+  const key = (typeof state !== 'undefined' && state.profile && state.profile.price_market) || 'usd_tcgplayer';
+  return MARKETS[key] || MARKETS.usd_tcgplayer;
+}
+function money(n) {
+  const m = priceMarket();
+  const v = Number(n) || 0;
+  if (m.cur === 'USD' || !fxRates || !fxRates[m.cur]) return '$' + v.toFixed(2);
+  const c = v * fxRates[m.cur];
+  return m.sym + (m.cur === 'JPY' ? Math.round(c).toLocaleString('en-US') : c.toFixed(2));
+}
+const usdFmt = (n) => '$' + (Number(n) || 0).toFixed(2);
+async function loadFxRates() {
+  if (fxRates) return;
+  try {
+    const r = await fetch('https://open.er-api.com/v6/latest/USD');
+    const j = await r.json();
+    if (j && j.rates && j.rates.EUR && j.rates.JPY) fxRates = { EUR: j.rates.EUR, JPY: j.rates.JPY };
+  } catch (e) { /* offline: displays stay in USD until rates load */ }
+}
+async function initPriceMarket() {
+  if (priceMarket().cur === 'USD') return;
+  await loadFxRates();
+  if (fxRates) refreshPriceDisplays();
+}
+function refreshPriceDisplays() {
+  loadMyBinders();
+  if (state.currentBinder) loadBinderCards();
+}
 /* A single card's own unit price. A missing price (null — e.g. a
    scanner-filed card whose price the nightly refresh hasn't filled in
    yet, v19) must never render as a fake $0.00: show "No price" instead.
@@ -693,6 +732,11 @@ function largeImageUri(uri) {
 function showCardDetail(c) {
   const dlg = $('#card-dialog');
   if (!dlg) return;
+  const token = ++cdToken;
+  cdFaces = [];
+  cdFaceIdx = 0;
+  const flipBtn = $('#cd-flip');
+  if (flipBtn) flipBtn.hidden = true;
   const displayName = c.printed_name && c.lang !== 'en' ? c.printed_name : c.name;
   $('#cd-name').textContent = displayName || '';
   const sub = [c.set_name || c.set_code || '', c.collector_number ? '#' + c.collector_number : ''].filter(Boolean).join(' · ');
@@ -724,6 +768,106 @@ function showCardDetail(c) {
     '<div class="cd-row"><span class="cd-k">' + esc(r[0]) + '</span><span class="cd-v">' + esc(r[1]) + '</span></div>'
   ).join('');
   if (!dlg.open) dlg.showModal();
+  fillCardMarkets(c, token);
+  fillCardHistory(c, token);
+}
+
+/* v21: live per-site prices for the open card (TCGplayer USD + Cardmarket
+   EUR straight from Scryfall), the two-source range when they disagree
+   wildly (same rule as the app: higher at least 50% above the lower AND
+   at least $1 apart), and the double-face flip when the printing has
+   more than one face. Appends rows under the dialog's base rows; a stale
+   fill (a different card opened meanwhile) drops itself. */
+let cdToken = 0;
+let cdFaces = [];
+let cdFaceIdx = 0;
+async function fillCardMarkets(c, token) {
+  if (!c.scryfall_id) return;
+  try {
+    const r = await fetch('https://api.scryfall.com/cards/' + encodeURIComponent(c.scryfall_id), { headers: { 'Accept': 'application/json' } });
+    if (!r.ok) return;
+    const card = await r.json();
+    if (token !== cdToken) return;
+    const faces = (card.card_faces || []).filter(f => f.image_uris && f.image_uris.large);
+    if (faces.length > 1) {
+      cdFaces = faces.map(f => f.image_uris.large);
+      cdFaceIdx = 0;
+      const flipBtn = $('#cd-flip');
+      if (flipBtn) flipBtn.hidden = false;
+    }
+    await loadFxRates();
+    if (token !== cdToken) return;
+    const p = card.prices || {};
+    const tcg = c.is_foil ? p.usd_foil : p.usd;
+    const cm = c.is_foil ? p.eur_foil : p.eur;
+    const rows = [];
+    if (tcg != null) rows.push(['TCGplayer', usdFmt(tcg)]);
+    if (cm != null) {
+      let v = '€' + Number(cm).toFixed(2);
+      if (fxRates && fxRates.EUR) v += ' (≈ ' + usdFmt(Number(cm) / fxRates.EUR) + ')';
+      rows.push(['Cardmarket', v]);
+    }
+    if (tcg != null && cm != null && fxRates && fxRates.EUR) {
+      const cmUsd = Number(cm) / fxRates.EUR;
+      const lo = Math.min(Number(tcg), cmUsd), hi = Math.max(Number(tcg), cmUsd);
+      if (hi >= lo * 1.5 && hi - lo >= 1) {
+        const loName = Number(tcg) <= cmUsd ? 'TCGplayer' : 'Cardmarket';
+        const hiName = loName === 'TCGplayer' ? 'Cardmarket' : 'TCGplayer';
+        rows.push(['Price range', usdFmt(lo) + ' – ' + usdFmt(hi) + ' (' + loName + ' low · ' + hiName + ' high)']);
+      }
+    }
+    if (rows.length) appendCdRows(rows, token);
+  } catch (e) { /* offline or Scryfall hiccup: base rows already shown */ }
+}
+
+/* v21: price movement from the website's own history table (seeded from
+   the app's snapshots back to 2026-11-11, extended nightly). Percentages
+   compare against the same price source, like the app: week / month /
+   all time, each shown only when a real baseline exists. */
+async function fillCardHistory(c, token) {
+  if (!c.scryfall_id || typeof sb === 'undefined') return;
+  try {
+    const { data, error } = await sb.from('card_price_history')
+      .select('price_usd, price_source, recorded_on')
+      .eq('scryfall_id', c.scryfall_id).eq('is_foil', !!c.is_foil)
+      .order('recorded_on', { ascending: true });
+    if (error || !data || !data.length || token !== cdToken) return;
+    const now = c.unit_price != null ? Number(c.unit_price) : Number(data[data.length - 1].price_usd);
+    if (now == null || Number.isNaN(now)) return;
+    const srcName = c.price_source || data[data.length - 1].price_source;
+    const sameSrc = data.filter(r => r.price_source === srcName && r.price_usd != null);
+    const pool = sameSrc.length ? sameSrc : data.filter(r => r.price_usd != null);
+    if (!pool.length) return;
+    const pct = (then) => (then == null || Number(then) === 0) ? null : ((now - Number(then)) / Number(then)) * 100;
+    const fmt = (p) => p == null ? '—' : (p > 0 ? '+' : '') + p.toFixed(1) + '%';
+    const base = (daysAgo) => {
+      const target = new Date(); target.setDate(target.getDate() - daysAgo);
+      let best = null;
+      pool.forEach(r => { if (new Date(r.recorded_on) <= target) best = r; });
+      return best ? Number(best.price_usd) : null;
+    };
+    const earliest = pool[0];
+    const week = pct(base(7)), month = pct(base(30));
+    const all = pool.length > 1 || new Date(earliest.recorded_on) < new Date(new Date().toDateString()) ? pct(Number(earliest.price_usd)) : null;
+    if (week == null && month == null && all == null) {
+      appendCdRows([['Price history', 'Not enough history yet — recording daily']], token);
+      return;
+    }
+    const since = new Date(earliest.recorded_on).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    appendCdRows([
+      ['Change · week', fmt(week)],
+      ['Change · month', fmt(month)],
+      ['Change · all time', fmt(all) + (all != null ? ' (since ' + since + ')' : '')]
+    ], token);
+  } catch (e) { /* history is a bonus; the dialog stands without it */ }
+}
+function appendCdRows(rows, token) {
+  if (token !== cdToken) return;
+  const wrap = $('#cd-rows');
+  if (!wrap) return;
+  wrap.innerHTML += rows.map(r =>
+    '<div class="cd-row"><span class="cd-k">' + esc(r[0]) + '</span><span class="cd-v">' + esc(r[1]) + '</span></div>'
+  ).join('');
 }
 
 async function changeQuantity(card, delta) {
@@ -1307,6 +1451,8 @@ function paintProfileForm() {
   paintAvatar($('#profile-avatar-preview'), p);
   $('#profile-name').value = p.display_name || '';
   $('#profile-public').checked = !!p.is_public;
+  const marketSel = $('#profile-market');
+  if (marketSel) marketSel.value = MARKETS[p.price_market] ? p.price_market : 'usd_tcgplayer';
   state.selectedColor = p.profile_color || DEFAULT_COLOR;
   const saved = themeFromProfile(p);
   if (saved) {
@@ -1473,7 +1619,8 @@ async function saveProfile(ev) {
     display_name: $('#profile-name').value.trim() || 'Collector',
     profile_color: state.selectedColor,
     theme: theme,
-    is_public: $('#profile-public').checked
+    is_public: $('#profile-public').checked,
+    price_market: ($('#profile-market') && MARKETS[$('#profile-market').value]) ? $('#profile-market').value : 'usd_tcgplayer'
   };
   try {
     const { data, error } = await sb.from('profiles')
@@ -1482,6 +1629,8 @@ async function saveProfile(ev) {
     state.profile = data;
     paintHeader();
     applyTheme(themeFromProfile(data));
+    initPriceMarket();
+    refreshPriceDisplays();
     paintProfileForm();
     $('#profile-status').textContent = 'Saved.';
     showNotice('Profile saved');
@@ -1739,6 +1888,7 @@ async function enterApp() {
     showNotice('Could not load your profile: ' + friendlyError(err), 7000);
   }
   applyTheme(themeFromProfile(state.profile));
+  initPriceMarket();
   reconcilePush();
   paintHeader();
   paintProfileForm();
@@ -1872,7 +2022,7 @@ async function loadMemberExtras(profile, publicBinders) {
             (c.image_uri ? '<img src="' + esc(c.image_uri) + '" alt="">' : '') +
             '<span class="grow"><span class="nm">' + (wanted ? '<span class="flag-want">★ </span>' : '') + esc(c.printed_name && c.lang !== 'en' ? c.printed_name : c.name) + '</span><br>' +
             '<span class="sub">' + esc(c.set_name || '') + (c.collector_number ? ' · #' + esc(c.collector_number) : '') + (c.is_foil ? ' · Foil' : '') + '</span></span>' +
-            '<span class="sub">' + (c.quantity - 1) + ' spare · ' + priceLabel(c.unit_price, ' ea') + '</span>';
+            '<span class="sub">' + (c.quantity - 1) + ' spare · ' + priceLabel(c.unit_price, ' ea') + (c.price_source ? ' · ' + esc(c.price_source) : '') + '</span>';
           wrap.appendChild(row);
         });
         sparesBlock.hidden = false;
@@ -1970,7 +2120,7 @@ function tradeSideHTML(items, ownerId, label) {
       (i.image_uri ? '<img src="' + esc(i.image_uri) + '" alt="">' : '') +
       '<span class="grow"><span class="nm">' + esc(i.name) + '</span><br>' +
       '<span class="sub">' + esc(i.set_name || '') + (i.collector_number ? ' · #' + esc(i.collector_number) : '') + (i.is_foil ? ' · Foil' : '') + '</span></span>' +
-      '<span class="sub">×' + (i.quantity || 1) + ' · ' + (i.unit_price == null ? 'No price' : money((Number(i.unit_price) || 0) * (i.quantity || 1))) + '</span>' +
+      '<span class="sub">×' + (i.quantity || 1) + ' · ' + (i.unit_price == null ? 'No price' : money((Number(i.unit_price) || 0) * (i.quantity || 1))) + (i.price_source ? ' · ' + esc(i.price_source) : '') + '</span>' +
     '</div>').join('')
     : '<p class="muted small">Nothing</p>';
   return '<div class="trade-side"><h4>' + esc(label) + ' — ' + money(total) + '</h4>' + rows + '</div>';
@@ -2386,7 +2536,7 @@ async function renderMySpares() {
       '<span class="grow"><span class="nm">' + (wanted ? '<span class="flag-want">★ Wanted by ' + esc(aimName) + ' — </span>' : '') +
         esc(c.printed_name && c.lang !== 'en' ? c.printed_name : c.name) + '</span><br>' +
       '<span class="sub">' + esc(c.set_name || '') + (c.collector_number ? ' · #' + esc(c.collector_number) : '') + (c.is_foil ? ' · Foil' : '') + '</span></span>' +
-      '<span class="sub">' + (c.quantity - 1) + ' spare · ' + priceLabel(c.unit_price, ' ea') + '</span>';
+      '<span class="sub">' + (c.quantity - 1) + ' spare · ' + priceLabel(c.unit_price, ' ea') + (c.price_source ? ' · ' + esc(c.price_source) : '') + '</span>';
     wrap.appendChild(row);
   });
   $('#spares-empty').hidden = spares.length > 0;
@@ -3693,6 +3843,13 @@ document.addEventListener('DOMContentLoaded', () => {
   $('#deck-cancel').addEventListener('click', () => $('#deck-dialog').close());
   // v20: card detail dialog — Close button and backdrop tap both dismiss it.
   $('#cd-close').addEventListener('click', () => $('#card-dialog').close());
+  $('#cd-flip').addEventListener('click', () => {
+    if (cdFaces.length < 2) return;
+    cdFaceIdx = (cdFaceIdx + 1) % cdFaces.length;
+    const img = $('#cd-img');
+    img.src = cdFaces[cdFaceIdx];
+    img.hidden = false;
+  });
   $('#card-dialog').addEventListener('click', (e) => { if (e.target === e.currentTarget) e.currentTarget.close(); });
   $('#btn-edit-deck').addEventListener('click', () => openDeckDialog(state.currentDeck));
   $('#btn-delete-deck').addEventListener('click', deleteCurrentDeck);

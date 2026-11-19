@@ -423,6 +423,16 @@
           <p id="notify-status" class="muted small notify-status"></p>
         </div>
 
+        <label class="field-row">
+          <span><strong>Prices shown from</strong><br>
+          <span class="muted small">Which market's money prices are displayed in. Prices are stored in dollars; the other markets convert at today's rate.</span></span>
+          <select id="profile-market">
+            <option value="usd_tcgplayer">USD · TCGplayer</option>
+            <option value="eur_cardmarket">EUR · Cardmarket</option>
+            <option value="jpy_hareruya">JPY · Hareruya</option>
+          </select>
+        </label>
+
         <label class="control check field-row">
           <input type="checkbox" id="profile-public">
           <span><strong>Public account</strong><br>
@@ -525,6 +535,7 @@
     <p id="cd-sub" class="muted"></p>
     <div id="cd-rows" class="cd-rows"></div>
     <div class="row-gap dialog-actions">
+      <button class="btn btn-ghost" id="cd-flip" type="button" hidden>Flip card</button>
       <button class="btn btn-ghost" id="cd-close" type="button">Close</button>
     </div>
   </div>
