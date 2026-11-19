@@ -810,10 +810,15 @@ async function fillCardMarkets(c, token) {
     if (tcg != null && cm != null && fxRates && fxRates.EUR) {
       const cmUsd = Number(cm) / fxRates.EUR;
       const lo = Math.min(Number(tcg), cmUsd), hi = Math.max(Number(tcg), cmUsd);
-      if (hi >= lo * 1.5 && hi - lo >= 1) {
+      /* v22 (Jakson's call): the range shows whenever both sites price the
+         card — the app tile's "only when they disagree wildly" rule made
+         it invisible on most cards in this dialog. */
+      if (hi > lo) {
         const loName = Number(tcg) <= cmUsd ? 'TCGplayer' : 'Cardmarket';
         const hiName = loName === 'TCGplayer' ? 'Cardmarket' : 'TCGplayer';
         rows.push(['Price range', usdFmt(lo) + ' – ' + usdFmt(hi) + ' (' + loName + ' low · ' + hiName + ' high)']);
+      } else {
+        rows.push(['Price range', usdFmt(lo) + ' (both sites agree)']);
       }
     }
     if (rows.length) appendCdRows(rows, token);
