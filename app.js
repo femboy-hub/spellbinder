@@ -2230,16 +2230,15 @@ function tradeCard(t, items, isOpen) {
   card.innerHTML =
     '<div class="trade-head"><span class="avatar"></span><strong>' + esc(otherName) + '</strong>' + chip +
       '<span class="muted small">' + (iAmProposer ? 'You proposed' : 'They proposed') + ' · ' + when + '</span></div>' +
-    // Action buttons at the TOP of the card (Jakson's ask) — no scrolling
-    // past both card lists to accept. Incoming trades repeat them at the
-    // bottom too, since those lists can be long.
+    // Action buttons at the TOP of the card only — no scrolling past both
+    // card lists to accept, and no duplicate buttons (the old top+bottom
+    // repeat looked broken to Jakson, 2026-11-27, so v26 keeps one set).
     (actions ? '<div class="row-gap" style="margin:.6rem 0;">' + actions + '</div>' : '') +
     (t.note ? '<p class="muted">“' + esc(t.note) + '”</p>' : '') +
     '<div class="trade-sides">' +
       tradeSideHTML(items, state.user.id, 'You give') +
       tradeSideHTML(items, iAmProposer ? t.partner_id : t.proposer_id, 'You get') +
     '</div>' +
-    (actions && !iAmProposer ? '<div class="row-gap" style="margin-top:.6rem;">' + actions + '</div>' : '') +
     // Per-trade chat (Phase 6): talk right on the trade while you haggle.
     '<div class="trade-chat-wrap">' +
       '<button type="button" class="btn btn-ghost" data-chat-toggle>💬 Chat</button>' +
