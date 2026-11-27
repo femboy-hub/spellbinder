@@ -682,6 +682,55 @@ function renderCards() {
     area.innerHTML = '';
     area.appendChild(cardGrid(cards));
   }
+  fillTileRanges(cards); // v25: tiles show the price range, not one price
+}
+
+/* v25 (Jakson, 2026-11-27): the small binder tiles show the same price
+   range as the enlarged view instead of a single price. One Scryfall
+   collection request (75 ids per call) covers a whole binder view, so
+   no per-tile fetching. Points: TCGplayer live, Cardmarket live
+   (converted), plus the stored Hareruya price for Japanese printings.
+   Fewer than two points (or sites agreeing) leaves the single price. */
+let tileRangeToken = 0;
+async function fillTileRanges(cards) {
+  const token = ++tileRangeToken;
+  const ids = [...new Set(cards.filter(c => c.scryfall_id).map(c => c.scryfall_id))];
+  if (!ids.length) return;
+  await loadFxRates();
+  const byId = {};
+  for (let i = 0; i < ids.length; i += 75) {
+    const chunk = ids.slice(i, i + 75);
+    try {
+      const r = await fetch('https://api.scryfall.com/cards/collection', {
+        method: 'POST',
+        headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ identifiers: chunk.map(id => ({ id })) })
+      });
+      if (!r.ok) continue;
+      const j = await r.json();
+      (j.data || []).forEach(card => { byId[card.id] = card.prices || {}; });
+    } catch (e) { return; }
+  }
+  if (token !== tileRangeToken) return;
+  cards.forEach(c => {
+    const p = byId[c.scryfall_id];
+    if (!p) return;
+    const pts = [];
+    const tcg = c.is_foil ? p.usd_foil : p.usd;
+    const cm = c.is_foil ? p.eur_foil : p.eur;
+    if (tcg != null) pts.push(Number(tcg));
+    if (cm != null && fxRates && fxRates.EUR) pts.push(Number(cm) / fxRates.EUR);
+    if (c.price_source === 'japanese_market' && c.unit_price != null &&
+        !pts.some(v => Math.abs(v - Number(c.unit_price)) < 0.011)) pts.push(Number(c.unit_price));
+    if (pts.length < 2) return;
+    const lo = Math.min(...pts), hi = Math.max(...pts);
+    if (!(hi > lo)) return;
+    document.querySelectorAll('[data-tile-price="' + c.id + '"]').forEach(el => {
+      el.textContent = usdFmt(lo) + ' – ' + usdFmt(hi);
+      const src = el.parentElement && el.parentElement.querySelector('.src');
+      if (src) src.textContent = 'range';
+    });
+  });
 }
 
 function cardGrid(cards) {
@@ -712,7 +761,7 @@ function cardTile(c) {
       '<div class="card-name">' + esc(displayName) + '</div>' +
       '<div class="card-sub">' + esc(c.set_name || '') + (c.collector_number ? ' · #' + esc(c.collector_number) : '') + '</div>' +
       '<div class="card-tags">' + finishTag + langBadge + '</div>' +
-      '<div class="card-price">' + priceLabel(c.unit_price) +
+      '<div class="card-price"><span class="cp-val" data-tile-price="' + c.id + '">' + priceLabel(c.unit_price) + '</span>' +
         (c.price_source ? ' <span class="src">' + esc(c.price_source) + '</span>' : '') + '</div>' +
       qtyHTML +
     '</div>';
@@ -756,22 +805,27 @@ function showCardDetail(c) {
     img.removeAttribute('src');
   }
   const qty = c.quantity || 1;
-  const rows = [];
-  if (c.type_line) rows.push(['Type', c.type_line]);
-  if (c.rarity) rows.push(['Rarity', String(c.rarity).charAt(0).toUpperCase() + String(c.rarity).slice(1)]);
-  rows.push(['Finish', c.is_foil ? 'Foil' : 'Non-foil']);
-  if (c.lang) rows.push(['Language', LANG_NAMES[c.lang] || String(c.lang).toUpperCase()]);
-  rows.push(['Quantity in binder', '×' + qty]);
+  // v25: the enlarged view is organised into headed sections instead of
+  // one long mixed list (Jakson: "looks cluttered", 2026-11-27).
+  const priceRows = [];
   if (c.unit_price != null && c.unit_price !== '' && !Number.isNaN(Number(c.unit_price))) {
-    rows.push(['Price each', priceLabel(c.unit_price) + (c.price_source ? ' (' + c.price_source + ')' : '')]);
-    if (qty > 1) rows.push(['Total for ×' + qty, money(Number(c.unit_price) * qty)]);
+    priceRows.push(['Price each', priceLabel(c.unit_price) + (c.price_source ? ' (' + c.price_source + ')' : '')]);
+    if (qty > 1) priceRows.push(['Total for ×' + qty, money(Number(c.unit_price) * qty)]);
   } else {
-    rows.push(['Price', priceLabel(c.unit_price)]);
+    priceRows.push(['Price', priceLabel(c.unit_price)]);
   }
-  if (c.added_at) rows.push(['Added', new Date(c.added_at).toLocaleDateString()]);
-  $('#cd-rows').innerHTML = rows.map(r =>
-    '<div class="cd-row"><span class="cd-k">' + esc(r[0]) + '</span><span class="cd-v">' + esc(r[1]) + '</span></div>'
-  ).join('');
+  const detailRows = [];
+  if (c.type_line) detailRows.push(['Type', c.type_line]);
+  if (c.rarity) detailRows.push(['Rarity', String(c.rarity).charAt(0).toUpperCase() + String(c.rarity).slice(1)]);
+  detailRows.push(['Finish', c.is_foil ? 'Foil' : 'Non-foil']);
+  if (c.lang) detailRows.push(['Language', LANG_NAMES[c.lang] || String(c.lang).toUpperCase()]);
+  const binderRows = [['Quantity in binder', '×' + qty]];
+  if (c.added_at) binderRows.push(['Added', new Date(c.added_at).toLocaleDateString()]);
+  renderCdRows('cd-prices', priceRows);
+  renderCdRows('cd-details', detailRows);
+  renderCdRows('cd-binder', binderRows);
+  const histEl = $('#cd-history'); if (histEl) histEl.innerHTML = '';
+  const histSec = $('#cd-history-section'); if (histSec) histSec.hidden = true;
   if (!dlg.open) dlg.showModal();
   fillCardMarkets(c, token);
   fillCardHistory(c, token);
@@ -870,7 +924,7 @@ async function fillCardHistory(c, token) {
     const week = pct(base(7)), month = pct(base(30));
     const all = pool.length > 1 || new Date(earliest.recorded_on) < new Date(new Date().toDateString()) ? pct(Number(earliest.price_usd)) : null;
     if (week == null && month == null && all == null) {
-      appendCdRows([['Price history', 'Not enough history yet — recording daily']], token);
+      appendCdRows([['Price history', 'Not enough history yet — recording daily']], token, 'cd-history');
       return;
     }
     const since = new Date(earliest.recorded_on).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
@@ -878,16 +932,24 @@ async function fillCardHistory(c, token) {
       ['Change · week', fmt(week)],
       ['Change · month', fmt(month)],
       ['Change · all time', fmt(all) + (all != null ? ' (since ' + since + ')' : '')]
-    ], token);
+    ], token, 'cd-history');
   } catch (e) { /* history is a bonus; the dialog stands without it */ }
 }
-function appendCdRows(rows, token) {
+function cdRowHtml(r) {
+  return '<div class="cd-row"><span class="cd-k">' + esc(r[0]) + '</span><span class="cd-v">' + esc(r[1]) + '</span></div>';
+}
+function renderCdRows(id, rows) {
+  const el = document.getElementById(id);
+  if (el) el.innerHTML = rows.map(cdRowHtml).join('');
+}
+function appendCdRows(rows, token, targetId) {
   if (token !== cdToken) return;
-  const wrap = $('#cd-rows');
+  const wrap = document.getElementById(targetId || 'cd-prices');
   if (!wrap) return;
-  wrap.innerHTML += rows.map(r =>
-    '<div class="cd-row"><span class="cd-k">' + esc(r[0]) + '</span><span class="cd-v">' + esc(r[1]) + '</span></div>'
-  ).join('');
+  if ((targetId || '') === 'cd-history') {
+    const sec = $('#cd-history-section'); if (sec) sec.hidden = false;
+  }
+  wrap.innerHTML += rows.map(cdRowHtml).join('');
 }
 
 async function changeQuantity(card, delta) {

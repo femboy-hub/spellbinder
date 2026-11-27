@@ -297,7 +297,9 @@ input[type="color"] { width: 44px; height: 34px; border: 1px solid var(--border)
 .card-dialog { width: min(480px, 94vw); max-height: 92vh; overflow-y: auto; }
 .card-detail-img { width: 100%; max-height: 60vh; object-fit: contain; border-radius: 10px; background: var(--surface-2); display: block; }
 .card-detail h3 { margin: .8rem 0 .15rem; overflow-wrap: anywhere; }
-.cd-rows { margin-top: .7rem; display: flex; flex-direction: column; gap: .35rem; }
+.cd-rows { display: flex; flex-direction: column; gap: .35rem; }
+.cd-section { margin-top: 1rem; }
+.cd-section h4 { margin: 0 0 .45rem; font-size: .78rem; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); border-bottom: 2px solid var(--border); padding-bottom: .3rem; }
 .cd-row { display: flex; justify-content: space-between; gap: 1rem; border-bottom: 1px solid var(--border); padding-bottom: .3rem; }
 .cd-k { color: var(--muted); flex-shrink: 0; }
 .cd-v { font-weight: 600; text-align: right; overflow-wrap: anywhere; }
